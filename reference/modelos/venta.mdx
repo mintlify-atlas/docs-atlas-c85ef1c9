@@ -1,0 +1,189 @@
+---
+title: "Modelos Venta y DetalleVenta: campos y enumeraciones"
+sidebarTitle: "Venta"
+description: "Referencia del modelo Venta con sus campos, enumeraciones EstadoVenta y TipoComprobante, y el modelo DetalleVenta que registra los productos de cada venta."
+---
+
+El modelo `Venta` pertenece al espacio de nombres `TiendaMiCholo.Models` y representa el encabezado de un comprobante de venta generado en la tienda. Cada instancia de `Venta` agrupa la información del cliente, el tipo de comprobante emitido, el total de la transacción y el estado actual del documento. Los productos incluidos en cada venta se registran por separado en la entidad `DetalleVenta`, que actúa como línea de detalle y mantiene la relación entre el encabezado y los artículos vendidos. Juntos, `Venta` y `DetalleVenta` forman el núcleo del módulo de facturación de Tienda MiCholo.
+
+## Propiedades de Venta
+
+<ParamField path="IdVenta" type="int" required>
+  Clave primaria de la entidad. Generada automáticamente por la base de datos mediante `DatabaseGeneratedOption.Identity`. No debe asignarse manualmente.
+</ParamField>
+
+<ParamField path="FechaVenta" type="DateTime" required>
+  Fecha y hora exacta en que se registró la venta. Se asigna en el controlador al momento de confirmar la transacción.
+</ParamField>
+
+<ParamField path="Cliente" type="string" required>
+  Nombre del cliente o razón social del comprador. Longitud máxima de **100 caracteres**. Si el usuario no ingresa un nombre en la interfaz, el controlador asigna el valor predeterminado `"Público en general"` antes de guardar.
+
+  <Note>
+    Para comprobantes tipo `FACTURA`, este campo debe contener la razón social de la empresa, no el nombre de una persona natural.
+  </Note>
+</ParamField>
+
+<ParamField path="TipoComprobante" type="TipoComprobante" required>
+  Tipo de comprobante de pago emitido. Valor de la enumeración `TipoComprobante` (`BOLETA` o `FACTURA`). Almacenado en la base de datos como cadena de texto gracias a la conversión configurada en `AppDbContext`:
+
+  ```csharp
+  modelBuilder.Entity<Venta>()
+      .Property(v => v.TipoComprobante)
+      .HasConversion<string>();
+  ```
+</ParamField>
+
+<ParamField path="Total" type="decimal(18,2)" required>
+  Monto total de la venta, calculado como la suma de `Cantidad × PrecioUnitario` de todos los `DetalleVenta` asociados. Almacenado con precisión `decimal(18,2)`.
+</ParamField>
+
+<ParamField path="Ruc" type="string?" default="null">
+  RUC (Registro Único de Contribuyente) del cliente. Longitud máxima de **11 caracteres**. Campo **nullable** — solo se requiere cuando `TipoComprobante == FACTURA`. Cuando se proporciona, debe contener exactamente 11 dígitos numéricos, validado en el controlador antes de guardar.
+
+  <Warning>
+    Si se emite una `FACTURA` sin proporcionar un RUC válido de 11 dígitos, el controlador rechazará la operación y retornará un error de validación al formulario.
+  </Warning>
+</ParamField>
+
+<ParamField path="Celular" type="string?" default="null">
+  Número de celular de contacto del cliente. Longitud máxima de **9 caracteres**. Campo **nullable** — solo se requiere cuando `TipoComprobante == FACTURA`. Debe tener exactamente 9 dígitos y comenzar con el dígito `9`, siguiendo el formato de celular peruano.
+</ParamField>
+
+<ParamField path="Estado" type="EstadoVenta" default="Activa">
+  Estado actual del comprobante. Valor de la enumeración `EstadoVenta`. Valor predeterminado: `EstadoVenta.Activa`. Almacenado como cadena de texto en la base de datos:
+
+  ```csharp
+  modelBuilder.Entity<Venta>()
+      .Property(v => v.Estado)
+      .HasConversion<string>();
+  ```
+
+  Una venta anulada no puede reactivarse; la operación de anulación restaura el stock de todos los productos incluidos en sus detalles.
+</ParamField>
+
+<ParamField path="ModificadoPor" type="string?" default="null">
+  Nombre de usuario (username de ASP.NET Core Identity) del empleado que anuló la venta. Permanece `null` mientras la venta esté en estado `Activa`. Se asigna automáticamente en el controlador al ejecutar la operación de anulación.
+</ParamField>
+
+---
+
+## Enumeración EstadoVenta
+
+La enumeración `EstadoVenta` (espacio de nombres `TiendaMiCholo.Models.Enums`) define los estados posibles del ciclo de vida de una venta. Se almacena como texto en la columna correspondiente de la base de datos.
+
+| Valor | Descripción |
+|-------|-------------|
+| `Activa` | Venta válida y activa. El stock fue descontado correctamente al momento de la transacción. |
+| `Anulada` | Venta anulada por un usuario autorizado. El stock de todos los productos involucrados fue restaurado automáticamente. |
+
+```csharp
+namespace TiendaMiCholo.Models.Enums
+{
+    public enum EstadoVenta
+    {
+        Activa,
+        Anulada
+    }
+}
+```
+
+<Warning>
+  La anulación de una venta es una operación irreversible desde la interfaz de usuario. Una vez que el estado cambia a `Anulada`, no existe flujo para reactivarla.
+</Warning>
+
+---
+
+## Enumeración TipoComprobante
+
+La enumeración `TipoComprobante` (espacio de nombres `TiendaMiCholo.Models.Enums`) define los dos tipos de documentos de pago que puede emitir la tienda, en concordancia con la normativa tributaria peruana de SUNAT.
+
+| Valor | Descripción | Campos adicionales requeridos |
+|-------|-------------|-------------------------------|
+| `BOLETA` | Comprobante para consumidor final. No requiere identificación tributaria del comprador. | Solo `Cliente` (nombre del consumidor; se acepta `"Público en general"` si se deja en blanco). |
+| `FACTURA` | Comprobante para empresas o personas con negocio. Habilita la deducción de IGV. | `Cliente` (razón social de la empresa), `Ruc` (exactamente 11 dígitos numéricos), `Celular` (9 dígitos, debe comenzar con `9`). |
+
+```csharp
+namespace TiendaMiCholo.Models.Enums
+{
+    public enum TipoComprobante
+    {
+        BOLETA,
+        FACTURA
+    }
+}
+```
+
+<Tip>
+  La lógica de validación condicional de `Ruc` y `Celular` se implementa en el controlador (`VentaController`), no mediante Data Annotations en el modelo, dado que ASP.NET Core no admite validaciones condicionales nativas con `[Required]`.
+</Tip>
+
+---
+
+## Modelo VentaItem
+
+`VentaItem` es un modelo **transiente** del espacio de nombres `TiendaMiCholo.Models`, utilizado exclusivamente durante el proceso de registro de una nueva venta en la sesión del usuario. Actúa como el carrito de compras temporal: acumula los productos seleccionados antes de que la venta sea confirmada y persistida como `Venta` + `DetalleVenta`.
+
+<Note>
+  `VentaItem` **no tiene tabla propia en la base de datos**. El `AppDbContext` no expone un `DbSet<VentaItem>`. Los datos de este modelo se almacenan en la sesión HTTP durante el flujo de creación de una venta y se descartan una vez que la transacción es confirmada o cancelada.
+</Note>
+
+<ParamField path="Id" type="int" required>
+  Identificador temporal del ítem dentro del carrito de la sesión actual. Generado mediante la anotación `[Key, DatabaseGenerated(DatabaseGeneratedOption.Identity)]` aunque el modelo no sea persistido directamente.
+</ParamField>
+
+<ParamField path="Cantidad" type="int" required>
+  Número de unidades del producto que el vendedor desea incluir en la venta.
+</ParamField>
+
+<ParamField path="Nombre" type="string" required>
+  Nombre del producto copiado desde `Producto.Nombre` en el momento de agregarlo al carrito. Longitud máxima de **100 caracteres**.
+</ParamField>
+
+<ParamField path="Precio" type="decimal(18,2)" required>
+  Precio unitario copiado desde `Producto.PrecioVenta` en el momento de agregarlo al carrito. Se utiliza para calcular el total preliminar que se muestra al vendedor antes de confirmar.
+</ParamField>
+
+---
+
+## Código fuente
+
+```csharp
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+using TiendaMiCholo.Models.Enums;
+
+namespace TiendaMiCholo.Models
+{
+    public class Venta
+    {
+        [Key, DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        public int IdVenta { get; set; }
+
+        [Required]
+        public DateTime FechaVenta { get; set; }
+
+        [Required, StringLength(100)]
+        public string Cliente { get; set; }
+
+        [Required]
+        public TipoComprobante TipoComprobante { get; set; }
+
+        [Required]
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal Total { get; set; }
+
+        [StringLength(11)]
+        public string? Ruc { get; set; }
+
+        [StringLength(9)]
+        public string? Celular { get; set; }
+
+        public EstadoVenta Estado { get; set; } = EstadoVenta.Activa;
+
+        public string? ModificadoPor { get; set; }
+
+        public ICollection<DetalleVenta> DetallesVentas { get; set; } = new List<DetalleVenta>();
+    }
+}
+```

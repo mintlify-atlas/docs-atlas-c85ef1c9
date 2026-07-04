@@ -1,0 +1,189 @@
+---
+title: "Autenticación y autorización con ASP.NET Identity"
+sidebarTitle: "Autenticación"
+description: "Cómo Tienda MiCholo gestiona autenticación por cookies y autorización por roles usando ASP.NET Core Identity con IdentityUser y IdentityRole."
+---
+
+Tienda MiCholo utiliza **ASP.NET Core Identity** para gestionar por completo la autenticación y autorización de sus usuarios. El sistema emplea autenticación basada en **cookies**, dos roles predefinidos (`Admin` y `Vendedor`) y está completamente integrado con EF Core a través de `AppDbContext`. No existe ningún proveedor de identidad externo: todas las credenciales se almacenan en la base de datos `DB_TIENDA_MICHOLO`.
+
+## Flujo de autenticación
+
+<Steps>
+  <Step title="Acceso a una ruta protegida">
+    Cuando un usuario no autenticado intenta visitar cualquier ruta decorada con `[Authorize]` (por ejemplo, `/Producto/Listar`), el middleware de autenticación detecta que no hay una cookie de sesión válida y redirige automáticamente a `/Account/Login`, la ruta configurada como `LoginPath`.
+  </Step>
+
+  <Step title="POST /Account/Login — validación de credenciales">
+    El controlador recibe el `LoginViewModel` del formulario y llama a `SignInManager.PasswordSignInAsync`. Este método verifica el hash de la contraseña almacenado en `AspNetUsers` y, si es correcto, emite la cookie de autenticación.
+
+    ```csharp Controllers/AccountController.cs
+    var result = await _signInManager.PasswordSignInAsync(
+        model.Email,
+        model.Password,
+        model.RememberMe,
+        lockoutOnFailure: false);
+    ```
+  </Step>
+
+  <Step title="Inicio de sesión exitoso — redirección">
+    Si `result.Succeeded` es `true`, la cookie de sesión queda establecida en el navegador y el usuario es redirigido a `/Producto/Listar`, la página principal de la aplicación.
+
+    ```csharp Controllers/AccountController.cs
+    if (result.Succeeded)
+    {
+        return RedirectToAction("Listar", "Producto");
+    }
+    ```
+  </Step>
+
+  <Step title="Inicio de sesión fallido — mensaje de error">
+    Si las credenciales son incorrectas, se agrega un error al `ModelState` y la vista de login se vuelve a renderizar con el mensaje de error visible para el usuario.
+
+    ```csharp Controllers/AccountController.cs
+    ModelState.AddModelError(string.Empty, "Intento de inicio de sesión no válido.");
+    ```
+  </Step>
+
+  <Step title="POST /Account/Logout — cierre de sesión">
+    Al hacer clic en "Cerrar sesión", el navegador envía una petición `POST` a `/Account/Logout`. El controlador llama a `SignInManager.SignOutAsync()`, que invalida e elimina la cookie de autenticación. Tras esto, el usuario es redirigido a `/Producto/Listar`, que a su vez lo enviará de vuelta al login al no estar autenticado.
+
+    ```csharp Controllers/AccountController.cs
+    [HttpPost]
+    public async Task<IActionResult> Logout()
+    {
+        await _signInManager.SignOutAsync();
+        return RedirectToAction("Listar", "Producto");
+    }
+    ```
+  </Step>
+</Steps>
+
+## Configuración de cookies
+
+Las rutas de redirección para autenticación y acceso denegado se configuran en `Program.cs` mediante `ConfigureApplicationCookie`:
+
+```csharp Program.cs
+builder.Services.ConfigureApplicationCookie(options =>
+{
+    options.LoginPath = "/Account/Login";
+    options.AccessDeniedPath = "/Account/AccessDenied";
+});
+```
+
+| Opción | Valor | Efecto |
+|---|---|---|
+| `LoginPath` | `/Account/Login` | Destino de la redirección cuando se requiere autenticación |
+| `AccessDeniedPath` | `/Account/AccessDenied` | Destino cuando el usuario está autenticado pero carece del rol necesario |
+
+## Identity con EF Core
+
+`AppDbContext` extiende `IdentityDbContext<IdentityUser>`, lo que vincula el sistema de identidad directamente con la base de datos de la tienda. No se requiere una base de datos separada para los usuarios:
+
+```csharp Data/AppDbContext.cs
+public class AppDbContext : IdentityDbContext<IdentityUser>
+{
+    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
+    {
+    }
+    // DbSets del dominio de negocio...
+}
+```
+
+La integración con EF Core se registra en `Program.cs`:
+
+```csharp Program.cs
+builder.Services.AddIdentity<IdentityUser, IdentityRole>(options => { /* ... */ })
+    .AddEntityFrameworkStores<AppDbContext>()
+    .AddDefaultTokenProviders();
+```
+
+`AddEntityFrameworkStores<AppDbContext>()` indica a Identity que debe usar `AppDbContext` para persistir todas sus entidades (usuarios, roles, claims, tokens) en las tablas `AspNet*` dentro de `DB_TIENDA_MICHOLO`.
+
+## Middleware de autenticación
+
+El orden en que se registran los middlewares en `Program.cs` es **estrictamente obligatorio**:
+
+```csharp Program.cs
+app.UseAuthentication(); // ANTES de UseAuthorization
+app.UseAuthorization();
+```
+
+<CardGroup cols={2}>
+  <Card title="UseAuthentication()" icon="key">
+    Inspecciona la petición entrante en busca de la cookie de sesión, deserializa el `ClaimsPrincipal` y lo asigna a `HttpContext.User`. Sin este paso, `HttpContext.User` siempre aparece como anónimo.
+  </Card>
+  <Card title="UseAuthorization()" icon="shield">
+    Evalúa los atributos `[Authorize]` del controlador o la acción usando la identidad ya establecida en `HttpContext.User`. Si se ejecuta antes de `UseAuthentication`, el usuario siempre aparece como no autenticado y **todos** los recursos protegidos denegarían el acceso.
+  </Card>
+</CardGroup>
+
+<Note>
+  Invertir el orden de estos dos middlewares provocaría que ningún usuario pueda iniciar sesión correctamente, ya que la autorización se evaluaría antes de que la identidad estuviera disponible en el contexto de la petición.
+</Note>
+
+## LoginViewModel
+
+El formulario de inicio de sesión está vinculado al siguiente ViewModel, definido en `ViewModels/LoginViewModel.cs`:
+
+```csharp ViewModels/LoginViewModel.cs
+public class LoginViewModel
+{
+    [Required(ErrorMessage = "El correo electrónico es requerido")]
+    [EmailAddress(ErrorMessage = "Formato de correo inválido")]
+    public string Email { get; set; }
+
+    [Required(ErrorMessage = "La contraseña es requerida")]
+    [DataType(DataType.Password)]
+    public string Password { get; set; }
+
+    public bool RememberMe { get; set; }
+}
+```
+
+| Campo | Tipo | Validación | Descripción |
+|---|---|---|---|
+| `Email` | `string` | `[Required]`, `[EmailAddress]` | Identificador único del usuario; se usa como `userName` en `PasswordSignInAsync` |
+| `Password` | `string` | `[Required]`, `[DataType(Password)]` | Contraseña en texto plano; Identity la compara contra el hash almacenado |
+| `RememberMe` | `bool` | Ninguna | Si es `true`, se pasa como `isPersistent: true` a `PasswordSignInAsync`, generando una cookie persistente |
+
+## Política de contraseñas
+
+Para facilitar las pruebas durante el desarrollo, la configuración de Identity en `Program.cs` relaja los requisitos estándar de contraseña:
+
+```csharp Program.cs
+builder.Services.AddIdentity<IdentityUser, IdentityRole>(options =>
+{
+    options.Password.RequireDigit = false;
+    options.Password.RequireLowercase = false;
+    options.Password.RequireNonAlphanumeric = false;
+    options.Password.RequireUppercase = false;
+    options.Password.RequiredLength = 6;
+})
+```
+
+| Opción | Valor configurado | Comportamiento |
+|---|---|---|
+| `RequireDigit` | `false` | No se exige ningún dígito numérico en la contraseña |
+| `RequireLowercase` | `false` | No se exige ninguna letra minúscula |
+| `RequireNonAlphanumeric` | `false` | No se exige ningún carácter especial (`!`, `@`, `#`, etc.) |
+| `RequireUppercase` | `false` | No se exige ninguna letra mayúscula |
+| `RequiredLength` | `6` | La contraseña debe tener al menos 6 caracteres |
+
+Gracias a esta configuración, las cuentas sembradas por `SeedData` pueden usar contraseñas simples como `admin123` y `Vendedor123`.
+
+<Warning>
+  Esta política de contraseñas está pensada **exclusivamente para entornos de desarrollo y pruebas**. Antes de llevar la aplicación a producción, habilita al menos `RequireDigit`, `RequireUppercase` y `RequireNonAlphanumeric`, y considera aumentar `RequiredLength` a un mínimo de 8 caracteres para cumplir con buenas prácticas de seguridad.
+</Warning>
+
+## Roles y usuarios predeterminados
+
+`SeedData.Initialize` garantiza que los roles y cuentas de prueba existen desde el primer arranque de la aplicación:
+
+| Usuario | Contraseña | Rol | Permisos |
+|---|---|---|---|
+| `admin@micholo.com` | `admin123` | `Admin` | Acceso total: productos, proveedores, ventas, usuarios, reportes |
+| `vendedor@micholo.com` | `Vendedor123` | `Vendedor` | Acceso restringido: productos y ventas (sin gestión de proveedores ni usuarios) |
+
+<Warning>
+  La página `/Account/AccessDenied` se muestra cuando un usuario **autenticado** intenta acceder a una ruta para la que no tiene el rol requerido. Por ejemplo, un usuario con rol `Vendedor` que intente visitar `/Proveedor/Listar` (restringida a `Admin`) será redirigido a esta página en lugar de recibir un error HTTP 403 genérico.
+</Warning>

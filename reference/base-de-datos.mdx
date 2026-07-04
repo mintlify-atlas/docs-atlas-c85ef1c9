@@ -1,0 +1,191 @@
+---
+title: "Esquema de base de datos y relaciones en EF Core"
+sidebarTitle: "Base de Datos"
+description: "Documentación del esquema de base de datos DB_TIENDA_MICHOLO: tablas, relaciones, migraciones de EF Core y configuración de AppDbContext."
+---
+
+La base de datos de Tienda MiCholo se llama **DB_TIENDA_MICHOLO** y reside en una instancia SQL Server (por defecto `(localdb)\MSSQLLocalDB` en desarrollo). Su esquema es gestionado íntegramente por **Entity Framework Core 10** a través de migraciones con código, lo que garantiza que la estructura de la base de datos siempre esté sincronizada con los modelos C# del proyecto.
+
+## AppDbContext
+
+`AppDbContext` es el punto de entrada a la base de datos. Extiende `IdentityDbContext<IdentityUser>`, lo que significa que hereda automáticamente todas las tablas de ASP.NET Identity además de exponer las entidades de negocio propias de la tienda.
+
+```csharp Data/AppDbContext.cs
+public class AppDbContext : IdentityDbContext<IdentityUser>
+{
+    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
+    {
+    }
+
+    public DbSet<Producto> Productos { get; set; }
+    public DbSet<Proveedor> Proveedores { get; set; }
+    public DbSet<Venta> Ventas { get; set; }
+    public DbSet<DetalleVenta> DetallesVentas { get; set; }
+}
+```
+
+### Tablas del dominio
+
+| DbSet | Tabla SQL generada | Descripción |
+|---|---|---|
+| `Productos` | `Productos` | Catálogo de artículos con precio, stock, categoría y fecha de vencimiento |
+| `Proveedores` | `Proveedores` | Empresas suministradoras con RUC y teléfono |
+| `Ventas` | `Ventas` | Cabecera de cada transacción: cliente, fecha, tipo de comprobante y total |
+| `DetallesVentas` | `DetallesVentas` | Líneas de detalle de cada venta: producto, cantidad y precio unitario |
+
+### Tablas de Identity heredadas
+
+Al extender `IdentityDbContext<IdentityUser>`, EF Core crea automáticamente el siguiente conjunto de tablas para gestionar usuarios, roles y tokens:
+
+| Tabla | Descripción |
+|---|---|
+| `AspNetUsers` | Cuentas de usuario (`IdentityUser`) |
+| `AspNetRoles` | Roles disponibles (`Admin`, `Vendedor`) |
+| `AspNetUserRoles` | Relación muchos-a-muchos entre usuarios y roles |
+| `AspNetUserClaims` | Claims adicionales asociados a un usuario |
+| `AspNetUserLogins` | Proveedores de inicio de sesión externos |
+| `AspNetUserTokens` | Tokens de seguridad (restablecimiento de contraseña, etc.) |
+| `AspNetRoleClaims` | Claims asociados a un rol |
+
+## Relaciones
+
+Las relaciones entre entidades se configuran explícitamente en `OnModelCreating` usando la API fluent de EF Core, lo que permite controlar el comportamiento en cascada de forma precisa.
+
+<CardGroup cols={1}>
+  <Card title="Producto → Proveedor (muchos a uno)" icon="link">
+    Cada producto pertenece a un único proveedor. La clave foránea `Proveedor_ID` en la tabla `Productos` apunta a `IdProveedor` en `Proveedores`.
+
+    ```csharp Data/AppDbContext.cs
+    modelBuilder.Entity<Producto>()
+        .HasOne(p => p.Proveedor)
+        .WithMany(pr => pr.Productos)
+        .HasForeignKey(p => p.Proveedor_ID)
+        .OnDelete(DeleteBehavior.Restrict);
+    ```
+
+    `OnDelete: Restrict` impide eliminar un proveedor mientras tenga productos asociados.
+  </Card>
+
+  <Card title="DetalleVenta → Producto (muchos a uno)" icon="link">
+    Cada línea de detalle referencia un producto. La clave foránea `Producto_ID` en `DetallesVentas` apunta a `IdProducto` en `Productos`.
+
+    ```csharp Data/AppDbContext.cs
+    modelBuilder.Entity<DetalleVenta>()
+        .HasOne(d => d.Producto)
+        .WithMany(p => p.DetallesVentas)
+        .HasForeignKey(d => d.Producto_ID)
+        .OnDelete(DeleteBehavior.Restrict);
+    ```
+
+    `OnDelete: Restrict` protege el historial de ventas: no se puede eliminar un producto si ya fue vendido.
+  </Card>
+
+  <Card title="DetalleVenta → Venta (muchos a uno)" icon="link">
+    Cada línea de detalle pertenece a una venta. La clave foránea `Venta_ID` en `DetallesVentas` apunta a `IdVenta` en `Ventas`.
+
+    ```csharp Data/AppDbContext.cs
+    modelBuilder.Entity<DetalleVenta>()
+        .HasOne(d => d.Venta)
+        .WithMany(v => v.DetallesVentas)
+        .HasForeignKey(d => d.Venta_ID)
+        .OnDelete(DeleteBehavior.Cascade);
+    ```
+
+    `OnDelete: Cascade` significa que al eliminar (o anular) una venta, sus líneas de detalle se eliminan automáticamente.
+  </Card>
+</CardGroup>
+
+## Conversiones de enumeraciones
+
+EF Core almacena los dos enums del modelo `Venta` como cadenas de texto (`nvarchar`) en lugar de enteros. Esto mejora la legibilidad directa de los datos en SQL Server y evita ambigüedades si el orden de los valores cambia en el futuro.
+
+```csharp Data/AppDbContext.cs
+protected override void OnModelCreating(ModelBuilder modelBuilder)
+{
+    modelBuilder.Entity<Venta>()
+        .Property(v => v.Estado)
+        .HasConversion<string>();
+
+    modelBuilder.Entity<Venta>()
+        .Property(v => v.TipoComprobante)
+        .HasConversion<string>();
+
+    // ... relaciones ...
+
+    base.OnModelCreating(modelBuilder);
+}
+```
+
+| Propiedad | Tipo C# | Valores posibles | Almacenado como |
+|---|---|---|---|
+| `Venta.Estado` | `EstadoVenta` | `Activa`, `Anulada` | `"Activa"` / `"Anulada"` |
+| `Venta.TipoComprobante` | `TipoComprobante` | `BOLETA`, `FACTURA` | `"BOLETA"` / `"FACTURA"` |
+
+<Note>
+  `HasConversion<string>()` es equivalente a usar un `ValueConverter` explícito que llama a `ToString()` al guardar y a `Enum.Parse()` al leer. EF Core lo resuelve automáticamente en tiempo de compilación.
+</Note>
+
+## Migraciones
+
+El historial de migraciones refleja la evolución incremental del esquema desde la creación inicial hasta las últimas incorporaciones de campos. Cada migración es un archivo C# con los métodos `Up` (aplicar cambio) y `Down` (revertir cambio).
+
+<Accordion title="Historial completo de migraciones">
+
+| # | Nombre de la migración | Descripción |
+|---|---|---|
+| 1 | `20260702045431_MiCholo 1` | Esquema inicial: tablas `Productos`, `Proveedores`, `Ventas`, `DetallesVentas` |
+| 2 | `20260703214234_g1` | Ajustes intermedios al esquema de negocio |
+| 3 | `20260703223248_IdentityUpdate` | Incorporación de las tablas de ASP.NET Core Identity |
+| 4 | `20260703233508_AddVentaEstado` | Agrega la columna `Estado` (enum `EstadoVenta`) a la tabla `Ventas` |
+| 5 | `20260704032717_AddFacturaFieldsToVenta` | Agrega los campos `Ruc`, `Celular`, `TipoComprobante` y `ModificadoPor` a `Ventas` |
+| 6 | `20260704051826_AddProductoActivo` | Agrega la columna `Activo` (`bit`) a la tabla `Productos` |
+| 7 | `20260704052618_UpdateProductosToActivo` | Actualiza los productos existentes estableciendo `Activo = 1` como valor predeterminado |
+
+</Accordion>
+
+### Comandos de migración
+
+Aplicar todas las migraciones pendientes a la base de datos:
+
+```bash
+dotnet ef database update
+```
+
+Crear una nueva migración después de modificar un modelo:
+
+```bash
+dotnet ef migrations add NombreMigracion
+```
+
+Revertir a una migración específica (por ejemplo, antes de agregar el campo `Activo`):
+
+```bash
+dotnet ef database update AddFacturaFieldsToVenta
+```
+
+<Note>
+  Los comandos `dotnet ef` requieren que el paquete `Microsoft.EntityFrameworkCore.Tools` esté instalado en el proyecto y que te encuentres en el directorio raíz del proyecto (donde reside `TiendaMiCholo.csproj`).
+</Note>
+
+## Nombre de la base de datos
+
+El nombre de la base de datos y la cadena de conexión se configuran en `appsettings.json`:
+
+```json appsettings.json
+{
+  "ConnectionStrings": {
+    "CadenaMiCholo": "Data Source=(localdb)\\MSSQLLocalDB;Initial Catalog=DB_TIENDA_MICHOLO;Trusted_Connection=True;TrustServerCertificate=True;"
+  }
+}
+```
+
+| Parámetro | Valor |
+|---|---|
+| `Data Source` | `(localdb)\MSSQLLocalDB` (SQL Server LocalDB para desarrollo) |
+| `Initial Catalog` | `DB_TIENDA_MICHOLO` |
+| `Trusted_Connection` | `True` (autenticación Windows integrada) |
+| `TrustServerCertificate` | `True` (omite validación de certificado TLS en LocalDB) |
+
+<Warning>
+  En producción, reemplaza la cadena de conexión por una que apunte a un servidor SQL Server real y **nunca** incluyas credenciales directamente en `appsettings.json`. Usa variables de entorno, Azure Key Vault o los secretos de usuario de .NET (`dotnet user-secrets`) para gestionar información sensible.
+</Warning>

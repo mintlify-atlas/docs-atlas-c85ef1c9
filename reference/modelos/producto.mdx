@@ -1,0 +1,182 @@
+---
+title: "Modelo Producto: campos, validaciones y relaciones"
+sidebarTitle: "Producto"
+description: "Referencia completa del modelo Producto en Tienda MiCholo: campos, tipos de datos, validaciones de Data Annotations, relaciones con Proveedor y DetalleVenta."
+---
+
+El modelo `Producto` forma parte del espacio de nombres `TiendaMiCholo.Models` y representa cada artículo registrado en el catálogo de la tienda. Es la entidad central del sistema de inventario: almacena información de identificación, precios, stock disponible y fecha de vencimiento, y sirve como punto de conexión entre los proveedores que suministran la mercancía y los detalles de cada venta realizada. Toda operación de compra, venta o ajuste de inventario referencia directamente a esta entidad.
+
+## Propiedades
+
+<ParamField path="IdProducto" type="int" required>
+  Clave primaria de la entidad. Generada automáticamente por la base de datos mediante `DatabaseGeneratedOption.Identity`. No debe asignarse manualmente.
+</ParamField>
+
+<ParamField path="Codigo" type="string" required>
+  Código interno del producto. Longitud máxima de **50 caracteres**. Se utiliza para identificar el producto de forma abreviada en listas y comprobantes.
+</ParamField>
+
+<ParamField path="Nombre" type="string" required>
+  Nombre descriptivo del producto. Longitud máxima de **100 caracteres**. Solo acepta letras (incluyendo caracteres acentuados y ñ), números y espacios, según la expresión regular:
+
+  ```
+  ^[a-zA-Z0-9\sáéíóúÁÉÍÓÚñÑ]+$
+  ```
+
+  <Warning>
+    Si el nombre contiene símbolos especiales como `%`, `&`, `#` o paréntesis, la validación fallará con el mensaje: _"El nombre solo puede contener letras y números."_
+  </Warning>
+</ParamField>
+
+<ParamField path="Categoria" type="string" required>
+  Categoría a la que pertenece el producto (por ejemplo: "Abarrotes", "Bebidas", "Limpieza"). Longitud máxima de **50 caracteres**.
+</ParamField>
+
+<ParamField path="PrecioCompra" type="decimal(18,2)" required>
+  Precio al que la tienda adquiere el producto de su proveedor. Almacenado con precisión `decimal(18,2)`. Debe ser **mayor a `0.01`** según la anotación `[Range(0.01, double.MaxValue)]`.
+
+  <Note>
+    Este campo establece el piso económico del producto. La lógica de negocio del controlador impide guardar un `PrecioVenta` inferior a este valor.
+  </Note>
+</ParamField>
+
+<ParamField path="PrecioVenta" type="decimal(18,2)" required>
+  Precio al que el producto se vende al cliente. Almacenado con precisión `decimal(18,2)`. No tiene anotación `Range` propia, pero la regla de negocio exige que `PrecioVenta >= PrecioCompra`; esta validación se aplica en el controlador antes de persistir el registro.
+</ParamField>
+
+<ParamField path="Stock" type="int" required>
+  Cantidad de unidades disponibles en inventario. Debe ser **mayor o igual a `0`** (`[Range(0, int.MaxValue)]`). El stock se descuenta automáticamente al confirmar una venta y se restaura si la venta es anulada.
+
+  <Warning>
+    Intentar registrar una venta con cantidad superior al stock disponible es bloqueado por la lógica del controlador antes de generar el `DetalleVenta`.
+  </Warning>
+</ParamField>
+
+<ParamField path="Activo" type="bool" default="true">
+  Indica si el producto está disponible para la venta. Valor predeterminado: `true`. Los productos inactivos no aparecen en el flujo de registro de ventas, pero sus registros históricos en `DetalleVenta` se conservan intactos.
+</ParamField>
+
+<ParamField path="FechaVencimiento" type="DateOnly?" default="null">
+  Fecha de vencimiento del producto. Campo **nullable** — los productos que no tienen vencimiento (útiles de limpieza, artículos de bazar, etc.) pueden dejarlo en `null`. Cuando se proporciona, la lógica de negocio valida que la fecha no sea anterior a la fecha actual al momento de guardar.
+
+  <Tip>
+    Use `DateOnly` en lugar de `DateTime` para este campo, ya que la hora exacta de vencimiento no es relevante para la gestión del inventario de retail.
+  </Tip>
+</ParamField>
+
+<ParamField path="Proveedor_ID" type="int" required>
+  Clave foránea que referencia al `Proveedor` que suministra este producto. Obligatorio: todo producto debe estar asociado a un proveedor registrado en el sistema.
+</ParamField>
+
+---
+
+## Relaciones
+
+El modelo `Producto` participa en dos relaciones definidas en `AppDbContext.OnModelCreating`:
+
+### Proveedor (muchos a uno)
+
+```csharp
+modelBuilder.Entity<Producto>()
+    .HasOne(p => p.Proveedor)
+    .WithMany(pr => pr.Productos)
+    .HasForeignKey(p => p.Proveedor_ID)
+    .OnDelete(DeleteBehavior.Restrict);
+```
+
+La propiedad de navegación `Proveedor` expone el objeto `Proveedor` completo asociado al producto. La política `OnDelete: Restrict` impide eliminar un proveedor mientras tenga productos registrados en el sistema.
+
+### DetallesVentas (uno a muchos)
+
+```csharp
+modelBuilder.Entity<DetalleVenta>()
+    .HasOne(d => d.Producto)
+    .WithMany(p => p.DetallesVentas)
+    .HasForeignKey(d => d.Producto_ID)
+    .OnDelete(DeleteBehavior.Restrict);
+```
+
+La colección `DetallesVentas` (tipo `ICollection<DetalleVenta>`) contiene todos los registros de línea de venta en los que aparece este producto. La política `OnDelete: Restrict` protege el historial de ventas: un producto no puede ser eliminado si ya fue vendido alguna vez.
+
+---
+
+### Modelo DetalleVenta
+
+`DetalleVenta` es la entidad de enlace entre `Venta` y `Producto`. Representa una línea individual dentro de un comprobante de venta: qué producto se vendió, en qué cantidad y a qué precio unitario.
+
+<ParamField path="IdDetalleVenta" type="int" required>
+  Clave primaria, generada automáticamente por la base de datos.
+</ParamField>
+
+<ParamField path="Venta_ID" type="int" required>
+  Clave foránea hacia la entidad `Venta` a la que pertenece este detalle. Configurada con `OnDelete: Cascade` — si se elimina una venta (operación no expuesta en la UI actual), todos sus detalles se eliminan en cascada.
+</ParamField>
+
+<ParamField path="Producto_ID" type="int" required>
+  Clave foránea hacia el `Producto` vendido en esta línea. Configurada con `OnDelete: Restrict` — garantiza la integridad del historial.
+</ParamField>
+
+<ParamField path="Cantidad" type="int" required>
+  Número de unidades del producto incluidas en esta línea de venta. Debe ser un entero positivo.
+</ParamField>
+
+<ParamField path="PrecioUnitario" type="decimal(18,2)" required>
+  Precio por unidad aplicado en el momento de la venta. Se captura en el momento de la transacción para preservar el historial aunque el `PrecioVenta` del producto cambie posteriormente.
+</ParamField>
+
+<Note>
+  El subtotal de cada línea se calcula como `Cantidad × PrecioUnitario`. La suma de todos los subtotales de una venta debe coincidir con el campo `Total` del encabezado `Venta`.
+</Note>
+
+---
+
+## Código fuente
+
+```csharp
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace TiendaMiCholo.Models
+{
+    public class Producto
+    {
+        [Key, DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        public int IdProducto { get; set; }
+
+        [Required, StringLength(50)]
+        public string Codigo { get; set; }
+
+        [Required(ErrorMessage = "El nombre es obligatorio")]
+        [StringLength(100)]
+        [RegularExpression(@"^[a-zA-Z0-9\sáéíóúÁÉÍÓÚñÑ]+$",
+            ErrorMessage = "El nombre solo puede contener letras y números.")]
+        public string Nombre { get; set; }
+
+        [Required(ErrorMessage = "La categoría es obligatoria")]
+        [StringLength(50)]
+        public string Categoria { get; set; }
+
+        [Required]
+        [Column(TypeName = "decimal(18,2)")]
+        [Range(0.01, double.MaxValue, ErrorMessage = "El precio de compra debe ser mayor a 0.")]
+        public decimal PrecioCompra { get; set; }
+
+        [Required]
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal PrecioVenta { get; set; }
+
+        [Required]
+        [Range(0, int.MaxValue, ErrorMessage = "El stock no puede ser negativo.")]
+        public int Stock { get; set; }
+
+        public bool Activo { get; set; } = true;
+
+        public DateOnly? FechaVencimiento { get; set; }
+
+        public int Proveedor_ID { get; set; }
+        public Proveedor Proveedor { get; set; }
+
+        public ICollection<DetalleVenta> DetallesVentas { get; set; } = new List<DetalleVenta>();
+    }
+}
+```

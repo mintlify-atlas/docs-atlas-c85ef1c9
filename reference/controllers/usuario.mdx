@@ -1,0 +1,202 @@
+---
+title: "UsuarioController: gestión de usuarios y roles (Admin)"
+sidebarTitle: "UsuarioController"
+description: "Referencia del UsuarioController: listar usuarios, crear con rol, editar email/contraseña/rol y eliminar. Restringido al rol Admin. Protege contra auto-eliminación."
+---
+
+`UsuarioController` proporciona la gestión completa del ciclo de vida de usuarios del sistema utilizando la infraestructura de ASP.NET Core Identity. El controller recibe `UserManager<IdentityUser>` y `RoleManager<IdentityRole>` vía inyección de dependencias, y está decorado con `[Authorize(Roles = "Admin")]` a **nivel de clase**, por lo que **ninguna acción es accesible para usuarios sin rol Admin**. Las operaciones de contraseña se realizan a través del flujo seguro `GeneratePasswordResetTokenAsync` + `ResetPasswordAsync`, evitando manipulación directa del hash.
+
+---
+
+### GET /Usuario/Index
+
+Lista todos los usuarios registrados en el sistema junto con su rol asignado.
+
+**Autorización:** `[Authorize(Roles = "Admin")]` (heredado de clase).
+
+**Comportamiento:**
+- Obtiene todos los `IdentityUser` con `_userManager.Users.ToListAsync()`.
+- Para cada usuario, llama a `GetRolesAsync(user)` y toma el primer rol (`FirstOrDefault`). Si el usuario no tiene rol, muestra `"Sin Rol"`.
+- Construye una lista de `UsuarioVM` con los campos `Id`, `Email` y `Rol`.
+
+**ViewModel proyectado:**
+
+```csharp
+public class UsuarioVM
+{
+    public string Id    { get; set; }
+    public string Email { get; set; }
+    public string Rol   { get; set; }
+}
+```
+
+**Retorno:** `View(List<UsuarioVM>)`.
+
+```csharp
+public async Task<IActionResult> Index()
+```
+
+---
+
+### GET /Usuario/Crear
+
+Muestra el formulario de creación de un nuevo usuario.
+
+**Autorización:** `[Authorize(Roles = "Admin")]` (heredado de clase).
+
+**Comportamiento:**
+- Consulta todos los roles disponibles con `_roleManager.Roles.Select(r => r.Name).ToListAsync()`.
+- Carga los roles en `ViewBag.Roles` como `SelectList` para el control de selección en la vista.
+
+**Retorno:** `View()`.
+
+```csharp
+[HttpGet]
+public async Task<IActionResult> Crear()
+```
+
+---
+
+### POST /Usuario/Crear
+
+Crea un nuevo `IdentityUser` y le asigna el rol seleccionado.
+
+**Autorización:** `[Authorize(Roles = "Admin")]` (heredado de clase).
+
+<ParamField body="model" type="CrearUsuarioVM" required>
+  ViewModel de creación de usuario.
+</ParamField>
+
+**Campos del ViewModel `CrearUsuarioVM`:**
+
+| Campo             | Tipo     | Descripción                                      |
+|-------------------|----------|--------------------------------------------------|
+| `Email`           | `string` | Email del nuevo usuario (usado también como `UserName`). |
+| `Password`        | `string` | Contraseña inicial.                              |
+| `ConfirmPassword` | `string` | Confirmación de contraseña.                      |
+| `Rol`             | `string` | Nombre del rol a asignar (debe existir en Identity). |
+
+**Flujo:**
+
+<Steps>
+  <Step title="Validación del ModelState">
+    Si el modelo no es válido, recarga `ViewBag.Roles` y devuelve el formulario.
+  </Step>
+  <Step title="Creación del usuario">
+    Instancia `IdentityUser { UserName = model.Email, Email = model.Email }` y llama a `_userManager.CreateAsync(user, model.Password)`.
+  </Step>
+  <Step title="Asignación de rol">
+    Si `result.Succeeded` y `model.Rol` no está vacío, llama a `_userManager.AddToRoleAsync(user, model.Rol)`.
+  </Step>
+  <Step title="Manejo de errores de Identity">
+    Si `CreateAsync` falla, añade cada error de Identity a `ModelState` con clave vacía y devuelve el formulario.
+  </Step>
+</Steps>
+
+**Retorno:** `RedirectToAction("Index")` en éxito · `View(CrearUsuarioVM)` en error.
+
+```csharp
+[HttpPost]
+public async Task<IActionResult> Crear(CrearUsuarioVM model)
+```
+
+---
+
+### GET /Usuario/Editar/{id}
+
+Muestra el formulario de edición para el usuario indicado, precargado con su email y rol actual.
+
+**Autorización:** `[Authorize(Roles = "Admin")]` (heredado de clase).
+
+<ParamField path="id" type="string" required>
+  GUID del `IdentityUser` (campo `Id` de ASP.NET Identity).
+</ParamField>
+
+**Comportamiento:**
+- Busca el usuario con `_userManager.FindByIdAsync(id)`.
+- Si no existe, establece `TempData["Error"]` y redirige a `Index`.
+- Obtiene los roles actuales con `GetRolesAsync(user)` y toma el primero.
+- Construye `EditarUsuarioVM` con `Id`, `Email` y `Rol` prellenos.
+- Carga `ViewBag.Roles` como `SelectList`.
+
+**Retorno:** `View(EditarUsuarioVM)` · `RedirectToAction("Index")` si no se encuentra.
+
+```csharp
+[HttpGet]
+public async Task<IActionResult> Editar(string id)
+```
+
+---
+
+### POST /Usuario/Editar
+
+Actualiza el email, el rol y opcionalmente la contraseña del usuario.
+
+**Autorización:** `[Authorize(Roles = "Admin")]` (heredado de clase).
+
+<ParamField body="model" type="EditarUsuarioVM" required>
+  ViewModel de edición de usuario.
+</ParamField>
+
+**Campos del ViewModel `EditarUsuarioVM`:**
+
+| Campo             | Tipo      | Descripción                                                       |
+|-------------------|-----------|-------------------------------------------------------------------|
+| `Id`              | `string`  | GUID del usuario a editar.                                        |
+| `Email`           | `string`  | Nuevo email (también actualiza `UserName`).                       |
+| `Password`        | `string?` | Nueva contraseña (opcional). Si está vacío, no se cambia.         |
+| `ConfirmPassword` | `string?` | Confirmación de la nueva contraseña (opcional).                   |
+| `Rol`             | `string`  | Nuevo rol a asignar.                                              |
+
+**Flujo:**
+
+<Steps>
+  <Step title="Actualización de email y UserName">
+    Asigna `user.Email = model.Email` y `user.UserName = model.Email`, luego llama a `_userManager.UpdateAsync(user)`.
+  </Step>
+  <Step title="Actualización de rol">
+    Compara `currentRoles.FirstOrDefault()` con `model.Rol`. Si difieren, llama a `RemoveFromRolesAsync` para quitar todos los roles actuales y luego `AddToRoleAsync` para asignar el nuevo.
+  </Step>
+  <Step title="Actualización de contraseña (opcional)">
+    Si `model.Password` no está vacío, genera un token con `GeneratePasswordResetTokenAsync(user)` y luego llama a `ResetPasswordAsync(user, token, model.Password)`. Si falla, añade errores a `ModelState` y devuelve el formulario.
+  </Step>
+</Steps>
+
+<Note>
+  La contraseña se actualiza mediante el flujo oficial de Identity (`GeneratePasswordResetTokenAsync` + `ResetPasswordAsync`), lo que garantiza que se apliquen todas las validaciones de política de contraseñas configuradas en `Program.cs`.
+</Note>
+
+**Retorno:** `RedirectToAction("Index")` en éxito · `View(EditarUsuarioVM)` en error.
+
+```csharp
+[HttpPost]
+public async Task<IActionResult> Editar(EditarUsuarioVM model)
+```
+
+---
+
+### POST /Usuario/Eliminar
+
+Elimina permanentemente un usuario del sistema.
+
+**Autorización:** `[Authorize(Roles = "Admin")]` (heredado de clase).
+
+<ParamField body="id" type="string" required>
+  GUID del `IdentityUser` a eliminar.
+</ParamField>
+
+<Warning>
+  **Protección contra auto-eliminación:** antes de proceder, el controller compara `user.UserName == User.Identity.Name`. Si el usuario autenticado intenta eliminar su propia cuenta, la operación es **bloqueada** con el mensaje: _"No puedes eliminar tu propia cuenta."_ Esto evita que el sistema quede sin administradores activos.
+</Warning>
+
+**Comportamiento:**
+- Busca el usuario con `FindByIdAsync(id)`. Si no existe, establece `TempData["Error"]` y redirige.
+- Si pasa la guarda de auto-eliminación, llama a `_userManager.DeleteAsync(user)`.
+- En éxito establece `TempData["Mensaje"]`; en error establece `TempData["Error"]`.
+
+**Retorno:** `RedirectToAction("Index")` en todos los casos.
+
+```csharp
+[HttpPost]
+public async Task<IActionResult> Eliminar(string id)
+```

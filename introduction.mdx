@@ -1,0 +1,69 @@
+---
+title: "Tienda MiCholo: Gestión retail integral en ASP.NET Core"
+sidebarTitle: "Introducción"
+description: "Tienda MiCholo es un sistema web para tiendas minoristas que unifica inventario, ventas, proveedores y reportes bajo un solo panel. Construido con .NET 10."
+---
+
+Tienda MiCholo es una aplicación web de gestión para tiendas minoristas desarrollada con **ASP.NET Core MVC** y orientada al mercado peruano. Está pensada para dueños de tiendas y personal de ventas que necesitan administrar su inventario, registrar ventas, controlar proveedores y hacer seguimiento de sus resultados comerciales desde un único panel, sin instalar software adicional. Construida sobre **.NET 10** con **Entity Framework Core** y **SQL Server** como base de datos relacional, la plataforma ofrece un entorno seguro, con autenticación y control de acceso por roles incorporado mediante ASP.NET Identity.
+
+## Características del sistema
+
+Tienda MiCholo organiza toda la operación de una tienda minorista en cuatro módulos principales, accesibles desde la barra de navegación según el rol del usuario.
+
+<CardGroup cols={2}>
+  <Card title="Gestión de Inventario" icon="boxes-stacked">
+    Registra, edita y elimina productos con código, nombre, categoría, precio y stock. El catálogo inicial se importa automáticamente desde `productos.json` al primer arranque.
+  </Card>
+  <Card title="Punto de Venta (POS)" icon="cash-register">
+    Permite al personal registrar ventas completas con múltiples líneas de detalle, selección de tipo de comprobante (boleta o factura) y actualización automática del stock.
+  </Card>
+  <Card title="Control de Proveedores" icon="truck">
+    Administra el directorio de proveedores con razón social, RUC y teléfono. Cada producto queda vinculado a su proveedor correspondiente en la base de datos.
+  </Card>
+  <Card title="Panel de Reportes" icon="chart-line">
+    Muestra el total de ventas del día y un gráfico de los últimos 7 días directamente en el dashboard principal (`/Home/Index`), facilitando el seguimiento del rendimiento diario.
+  </Card>
+</CardGroup>
+
+## Roles de usuario
+
+El sistema tiene dos roles integrados que se crean automáticamente al iniciar la aplicación por primera vez. El acceso a cada módulo está restringido por rol mediante atributos de autorización en los controladores.
+
+| Rol | Acceso |
+|---|---|
+| **Admin** | Acceso completo: gestionar productos, proveedores y usuarios, registrar ventas y visualizar reportes en el dashboard. |
+| **Vendedor** | Acceso restringido: consultar el listado de productos y registrar nuevas ventas. No tiene acceso a la administración de proveedores ni al panel de reportes. |
+
+<Note>
+  Si un usuario sin sesión activa intenta acceder a cualquier ruta protegida, el sistema lo redirige automáticamente a `/Account/Login`. Los accesos denegados por rol se redirigen a `/Account/AccessDenied`.
+</Note>
+
+## Arquitectura
+
+Tienda MiCholo sigue el patrón **MVC (Model-View-Controller)** propio de ASP.NET Core. La lógica de negocio reside en los controladores del namespace `TiendaMiCholo`, las vistas usan Razor (`.cshtml`) y los modelos representan las entidades de dominio: `Producto`, `Proveedor`, `Venta` y `DetalleVenta`.
+
+La capa de datos está implementada con **Entity Framework Core** a través de `AppDbContext`, que extiende `IdentityDbContext<IdentityUser>` para integrar las tablas de ASP.NET Identity (usuarios, roles y claims) en la misma base de datos SQL Server. Las relaciones clave son:
+
+- Un `Producto` pertenece a un `Proveedor` (FK `Proveedor_ID`, eliminación restringida).
+- Una `Venta` contiene uno o más registros `DetalleVenta` (eliminación en cascada).
+- Cada `DetalleVenta` referencia un `Producto` (eliminación restringida).
+
+La autenticación y autorización se gestionan con **ASP.NET Core Identity**, configurado con políticas de contraseña relajadas para facilitar el desarrollo local.
+
+## Stack tecnológico
+
+Los paquetes NuGet principales declarados en `TiendaMiCholo.csproj` son:
+
+| Paquete | Versión | Propósito |
+|---|---|---|
+| `Microsoft.AspNetCore.Identity.EntityFrameworkCore` | 10.0.9 | Integración de Identity con EF Core |
+| `Microsoft.EntityFrameworkCore` | 10.0.9 | ORM base |
+| `Microsoft.EntityFrameworkCore.SqlServer` | 10.0.9 | Proveedor de base de datos SQL Server |
+| `Microsoft.EntityFrameworkCore.Design` | 10.0.9 | Herramientas de diseño para migraciones (desarrollo) |
+| `Microsoft.EntityFrameworkCore.Tools` | 10.0.9 | CLI de EF Core para `dotnet ef` (desarrollo) |
+
+El proyecto apunta a **`net10.0`** con `Nullable` e `ImplicitUsings` habilitados, siguiendo las convenciones modernas de C#.
+
+<Note>
+  ¿Listo para tener la aplicación corriendo en tu máquina? Sigue la guía de [Inicio Rápido](/quickstart) para clonar el repositorio, aplicar las migraciones e iniciar sesión en menos de 10 minutos.
+</Note>

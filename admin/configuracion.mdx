@@ -1,0 +1,156 @@
+---
+title: "Configuración del sistema: base de datos y parámetros"
+sidebarTitle: "Configuración"
+description: "Configura la cadena de conexión SQL Server, ajusta la política de contraseñas y entiende los parámetros de inicio de la aplicación en appsettings.json."
+---
+
+Esta página describe todos los parámetros de configuración de Tienda MiCholo: la cadena de conexión a la base de datos en `appsettings.json`, la política de contraseñas e Identity en `Program.cs`, el comportamiento de los datos semilla al iniciar la aplicación, la ruta por defecto del enrutador y la configuración de logging. Revisar estos ajustes es el primer paso antes de desplegar el sistema en un entorno nuevo.
+
+## Cadena de conexión
+
+La cadena de conexión se define en `appsettings.json` bajo la clave `ConnectionStrings.CadenaMiCholo` y es leída en `Program.cs` con `builder.Configuration.GetConnectionString("CadenaMiCholo")`.
+
+```json appsettings.json
+{
+  "ConnectionStrings": {
+    "CadenaMiCholo": "Data Source=(localdb)\\MSSQLLocalDB;Initial Catalog=DB_TIENDA_MICHOLO;Trusted_Connection=True;TrustServerCertificate=True;"
+  }
+}
+```
+
+Cada parámetro de la cadena tiene el siguiente significado:
+
+| Parámetro | Valor por defecto | Descripción |
+|---|---|---|
+| `Data Source` | `(localdb)\\MSSQLLocalDB` | Instancia de SQL Server LocalDB instalada con Visual Studio. Solo disponible en entornos de desarrollo Windows. |
+| `Initial Catalog` | `DB_TIENDA_MICHOLO` | Nombre de la base de datos. Si no existe, EF Core la crea al ejecutar las migraciones. |
+| `Trusted_Connection` | `True` | Usa autenticación integrada de Windows. No requiere usuario ni contraseña explícitos. |
+| `TrustServerCertificate` | `True` | Omite la validación del certificado TLS del servidor. Recomendado solo en entornos locales o con certificados autofirmados. |
+
+### Cambiar a un servidor SQL Server completo
+
+Para apuntar a una instancia de SQL Server en red (por ejemplo, en un servidor de producción o staging), reemplaza la cadena de conexión con credenciales de SQL Server:
+
+```json appsettings.json
+{
+  "ConnectionStrings": {
+    "CadenaMiCholo": "Server=mi-servidor\\SQLEXPRESS;Database=DB_TIENDA_MICHOLO;User Id=sa;Password=TuPasswordSegura;TrustServerCertificate=True;"
+  }
+}
+```
+
+<Tip>
+  Para mantener separadas las configuraciones de desarrollo y producción, puedes sobrescribir la cadena de conexión en `appsettings.Development.json` sin tocar el archivo principal. El archivo `appsettings.Development.json` solo se carga cuando `ASPNETCORE_ENVIRONMENT=Development`.
+</Tip>
+
+## Configuración de contraseñas
+
+Las reglas de complejidad de contraseñas se configuran en `Program.cs` al registrar ASP.NET Core Identity:
+
+```csharp
+builder.Services.AddIdentity<IdentityUser, IdentityRole>(options => {
+    options.Password.RequireDigit = false;
+    options.Password.RequireLowercase = false;
+    options.Password.RequireNonAlphanumeric = false;
+    options.Password.RequireUppercase = false;
+    options.Password.RequiredLength = 6;
+})
+.AddEntityFrameworkStores<AppDbContext>()
+.AddDefaultTokenProviders();
+```
+
+La configuración actual desactiva todos los requisitos de complejidad y establece únicamente una longitud mínima de **6 caracteres**. Esto facilita el trabajo durante el desarrollo y las pruebas con datos semilla.
+
+Para un entorno de producción se recomienda habilitar las restricciones adicionales:
+
+```csharp
+// Configuración recomendada para producción
+options.Password.RequireDigit = true;
+options.Password.RequireLowercase = true;
+options.Password.RequireNonAlphanumeric = true;
+options.Password.RequireUppercase = true;
+options.Password.RequiredLength = 8;
+```
+
+## Datos semilla (SeedData)
+
+Al arrancar la aplicación, `Program.cs` invoca dos métodos de `SeedData` dentro de un scope de servicios:
+
+```csharp
+using (var scope = app.Services.CreateScope())
+{
+    var services = scope.ServiceProvider;
+    await SeedData.Initialize(services);
+    await SeedData.SeedProductos(services);
+}
+```
+
+### `SeedData.Initialize`
+
+Este método garantiza que el sistema siempre tenga los roles y cuentas mínimas necesarias para operar:
+
+<Steps>
+  <Step title="Crea los roles del sistema">
+    Verifica si los roles `Admin` y `Vendedor` existen. Si no existen, los crea con `RoleManager.CreateAsync`. Esta verificación asegura que el proceso sea idempotente y no genere duplicados.
+  </Step>
+  <Step title="Crea la cuenta administrador">
+    Busca `admin@micholo.com`. Si no existe, crea el `IdentityUser` y lo agrega al rol **Admin**. Si ya existe, fuerza el reseteo de su contraseña a `admin123` mediante un token de reseteo para garantizar consistencia en el entorno de desarrollo.
+  </Step>
+  <Step title="Crea la cuenta vendedor">
+    Busca `vendedor@micholo.com`. Si no existe, crea el `IdentityUser` con contraseña `Vendedor123` y lo asigna al rol **Vendedor**. Si ya existe, no realiza ninguna modificación.
+  </Step>
+</Steps>
+
+### `SeedData.SeedProductos`
+
+Este método importa el catálogo inicial de productos desde un archivo JSON externo:
+
+<Steps>
+  <Step title="Verifica si ya hay productos">
+    Si la tabla `Productos` contiene al menos un registro, el método termina inmediatamente sin realizar ninguna inserción. Esto evita duplicar el catálogo en reinicios posteriores de la aplicación.
+  </Step>
+  <Step title="Lee el archivo productos.json">
+    Carga el archivo `productos.json` desde el directorio raíz de la aplicación (`Directory.GetCurrentDirectory()`). Si el archivo no existe, el método termina silenciosamente.
+  </Step>
+  <Step title="Crea un proveedor por defecto">
+    Si no existe un proveedor con `RazonSocial = "Proveedor General"`, lo crea en la tabla `Proveedores` con RUC `00000000000` y teléfono `000000000`. Todos los productos importados quedarán asignados a este proveedor.
+  </Step>
+  <Step title="Inserta productos en lotes de 1000">
+    Los productos se insertan en tandas de **1,000 registros** para evitar timeouts y presión excesiva en memoria. Para cada producto se verifica que los campos `Codigo`, `Nombre` y `Categoria` no excedan los límites de longitud definidos en el modelo (50, 100 y 50 caracteres respectivamente).
+  </Step>
+</Steps>
+
+## Ruta por defecto
+
+El enrutador de la aplicación está configurado en `Program.cs` con la siguiente ruta por defecto:
+
+```csharp
+app.MapControllerRoute(
+    name: "default",
+    pattern: "{controller=Producto}/{action=Listar}/{id?}")
+    .WithStaticAssets();
+```
+
+Esto significa que al acceder a la raíz del sitio (`/`), la aplicación redirige directamente a `/Producto/Listar` —el listado de inventario— en lugar de `/Home/Index`. El segmento `{id?}` es opcional y permite pasar un identificador numérico a cualquier acción que lo acepte.
+
+## Logging
+
+La configuración de logging en `appsettings.json` define los niveles de detalle de los mensajes registrados:
+
+```json appsettings.json
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  }
+}
+```
+
+| Proveedor | Nivel | Descripción |
+|---|---|---|
+| `Default` | `Information` | Registra mensajes informativos, advertencias y errores de toda la aplicación. |
+| `Microsoft.AspNetCore` | `Warning` | Limita los mensajes del framework de ASP.NET Core a advertencias y errores, reduciendo el ruido en los logs durante el desarrollo. |
+
+Los niveles disponibles en orden de menor a mayor severidad son: `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, `None`.

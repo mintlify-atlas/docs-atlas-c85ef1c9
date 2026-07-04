@@ -1,0 +1,118 @@
+---
+title: "Reportes de ventas: productos más vendidos y dashboard"
+sidebarTitle: "Reportes"
+description: "Consulta el reporte de los 5 productos más vendidos por cantidad y el dashboard con ventas del día, total de productos activos y gráfico de 7 días."
+---
+
+El módulo de reportes ofrece dos vistas analíticas para monitorear el desempeño comercial de Tienda MiCholo: un reporte dedicado con los productos más vendidos de todos los tiempos y un dashboard principal que resume las métricas operativas del día con un gráfico de tendencia de los últimos 7 días. Ambas vistas están disponibles para todos los usuarios autenticados.
+
+## Productos más vendidos
+
+```
+GET /Reporte/MasVendidos
+```
+
+Este reporte consulta la tabla `DetallesVentas`, agrupa los registros por `Producto_ID` y calcula las métricas de venta acumuladas. El resultado contiene el **top 5** de productos según cantidad total vendida.
+
+**Lógica de la consulta:**
+
+```csharp
+var topProductos = await _context.DetallesVentas
+    .Include(d => d.Producto)
+    .GroupBy(d => d.Producto_ID)
+    .Select(grupo => new {
+        ProductoId    = grupo.Key,
+        NombreProducto = grupo.First().Producto.Nombre,
+        CantidadTotal  = grupo.Sum(d => d.Cantidad),
+        TotalRecaudado = grupo.Sum(d => d.Cantidad * d.PrecioUnitario)
+    })
+    .OrderByDescending(x => x.CantidadTotal)
+    .Take(5)
+    .ToListAsync();
+```
+
+**Campos del resultado:**
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `ProductoId` | `int` | `IdProducto` del producto agrupado. |
+| `NombreProducto` | `string` | Nombre del producto (tomado del primer registro del grupo). |
+| `CantidadTotal` | `int` | Suma total de unidades vendidas: `SUM(Cantidad)`. |
+| `TotalRecaudado` | `decimal` | Monto total recaudado: `SUM(Cantidad * PrecioUnitario)`. |
+
+<Note>
+  El reporte de productos más vendidos considera **todas las ventas históricas sin filtrar por estado**. Es decir, los `DetalleVenta` vinculados a ventas con `EstadoVenta.Anulada` también se incluyen en el cómputo, ya que el agrupamiento se realiza directamente sobre `DetallesVentas` sin hacer join con `Ventas` para filtrar por `EstadoVenta`.
+</Note>
+
+Si ocurre un error durante la consulta, el controlador redirige al dashboard principal con un mensaje en `TempData["Error"]`.
+
+## Dashboard principal
+
+```
+GET /Home/Index
+```
+
+El dashboard es la página de inicio de Tienda MiCholo. Utiliza el `DashboardViewModel` para consolidar las métricas clave del negocio y los datos del gráfico de ventas semanales.
+
+**Campos de `DashboardViewModel`:**
+
+| Propiedad | Tipo | Descripción |
+|---|---|---|
+| `VentasDelDia` | `decimal` | Suma de `Venta.Total` de todas las ventas con `Estado = Activa` cuya `FechaVenta.Date` sea igual a `DateTime.Today`. |
+| `ProductosActivos` | `int` | Conteo de productos donde `Activo = true`. |
+| `ProveedoresTotal` | `int` | Conteo total de proveedores registrados en el sistema, sin filtros. |
+| `DiasUltimos7` | `List<string>` | Lista de 7 nombres de días (por ejemplo, `"Lunes"`, `"Martes"`…) generados con la cultura **`es-PE`** (español peruano). |
+| `VentasUltimos7Dias` | `List<decimal>` | Lista de 7 totales de ventas (`Activa`) correspondientes a cada uno de los últimos 7 días, en el mismo orden que `DiasUltimos7`. Días sin ventas tienen valor `0`. |
+
+**Lógica de las ventas del día:**
+
+```csharp
+var hoy = DateTime.Today;
+
+var ventasDelDia = _context.Ventas
+    .Where(v => v.FechaVenta.Date == hoy && v.Estado == EstadoVenta.Activa)
+    .Sum(v => (decimal?)v.Total) ?? 0;
+```
+
+**Lógica del gráfico de 7 días:**
+
+```csharp
+var fechaInicio = hoy.AddDays(-6); // desde hace 6 días hasta hoy
+
+var ventasUltimos7Dias = _context.Ventas
+    .Where(v => v.FechaVenta.Date >= fechaInicio
+             && v.FechaVenta.Date <= hoy
+             && v.Estado == EstadoVenta.Activa)
+    .GroupBy(v => v.FechaVenta.Date)
+    .Select(g => new { Fecha = g.Key, Total = g.Sum(v => v.Total) })
+    .ToList();
+
+var culture = new CultureInfo("es-PE");
+
+for (int i = 0; i < 7; i++)
+{
+    var currentDay = fechaInicio.AddDays(i);
+    dias.Add(culture.TextInfo.ToTitleCase(currentDay.ToString("dddd", culture)));
+    var venta = ventasUltimos7Dias.FirstOrDefault(v => v.Fecha.Date == currentDay);
+    totales.Add(venta != null ? venta.Total : 0);
+}
+```
+
+<Tip>
+  El gráfico de los últimos 7 días usa la localización **`es-PE`** (español de Perú) para generar los nombres de los días de la semana. Los nombres se capitalizan con `ToTitleCase` antes de enviarse a la vista, resultando en etiquetas como `"Lunes"`, `"Martes"`, etc.
+</Tip>
+
+<CardGroup cols={2}>
+  <Card title="Ventas del día" icon="circle-dollar-to-slot">
+    Solo cuenta ventas con `EstadoVenta.Activa`. Las ventas anuladas se excluyen del total del día para reflejar los ingresos reales.
+  </Card>
+  <Card title="Gráfico semanal" icon="chart-line">
+    Cubre un rango de 7 días (hoy incluido). Los días sin ninguna venta activa aparecen con valor `0` en la serie, garantizando que el gráfico siempre tenga exactamente 7 puntos de datos.
+  </Card>
+  <Card title="Productos activos" icon="boxes-stacked">
+    Refleja el conteo en tiempo real de productos con `Activo = true`. Los productos desactivados no se cuentan.
+  </Card>
+  <Card title="Total de proveedores" icon="truck">
+    Conteo simple de todos los proveedores registrados, sin distinción de estado (no hay campo `Activo` en `Proveedor`).
+  </Card>
+</CardGroup>

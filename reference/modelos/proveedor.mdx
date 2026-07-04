@@ -1,0 +1,140 @@
+---
+title: "Modelo Proveedor: campos y validaciones RUC peruano"
+sidebarTitle: "Proveedor"
+description: "Referencia del modelo Proveedor con validación de RUC peruano (11 dígitos), formato de celular peruano, y relación con el catálogo de productos."
+---
+
+El modelo `Proveedor` pertenece al espacio de nombres `TiendaMiCholo.Models` y representa a las empresas o personas naturales que abastecen de mercancía a la tienda. Su rol principal en el sistema es servir de punto de referencia para el catálogo de productos: todo `Producto` registrado debe estar asociado a un proveedor existente. El modelo incorpora validaciones orientadas al contexto tributario y de telecomunicaciones peruano, incluyendo el formato del RUC de SUNAT y el esquema de numeración de celulares de operadoras locales.
+
+## Propiedades
+
+<ParamField path="IdProveedor" type="int" required>
+  Clave primaria de la entidad. Generada automáticamente por la base de datos mediante `DatabaseGeneratedOption.Identity`. No debe asignarse manualmente.
+</ParamField>
+
+<ParamField path="RazonSocial" type="string" required>
+  Nombre comercial o razón social del proveedor tal como aparece registrado en SUNAT. Longitud máxima de **100 caracteres**. No puede contener dígitos numéricos, según la expresión regular:
+
+  ```
+  ^[^0-9]+$
+  ```
+
+  <Warning>
+    Si la razón social contiene números (por ejemplo, `"Distribuidora 3M S.A.C."`), la validación fallará con el mensaje: _"El nombre de la empresa no admite números."_ En ese caso se recomienda escribir el número en letras o usar la denominación oficial sin numerales.
+  </Warning>
+</ParamField>
+
+<ParamField path="Ruc" type="string" required>
+  Registro Único de Contribuyente asignado por SUNAT. Longitud máxima de **11 caracteres**. Debe contener exactamente 11 dígitos numéricos, sin letras, espacios ni guiones:
+
+  ```
+  ^\d{11}$
+  ```
+
+  Además de la validación de formato, el sistema impone **unicidad a nivel de base de datos**: no pueden existir dos proveedores con el mismo RUC. Esta restricción se verifica en el controlador antes de insertar o actualizar el registro.
+
+  <Note>
+    Los RUC peruanos de personas jurídicas comienzan con `20` y los de personas naturales con negocios comienzan con `10`. El sistema no verifica el prefijo, solo la longitud y que sean dígitos.
+  </Note>
+</ParamField>
+
+<ParamField path="Telefono" type="string" default="null">
+  Número de celular de contacto del proveedor. Campo **opcional**. Cuando se proporciona, debe cumplir el formato de celular peruano según la expresión regular:
+
+  ```
+  ^9(?!(\d)\1{7})\d{8}$
+  ```
+
+  Esta expresión garantiza que:
+  - El número tenga exactamente **9 dígitos**.
+  - El primer dígito sea **9** (prefijo obligatorio de celulares peruanos).
+  - No se trate de un número trivialmente inválido con **8 dígitos consecutivos idénticos** (por ejemplo, `999999999` o `911111111` son rechazados).
+
+  <Tip>
+    El campo `Telefono` está anotado con `[StringLength(50)]` en el modelo, aunque la expresión regular restringe la entrada efectiva a 9 dígitos. Esta discrepancia no genera problemas funcionales, ya que la regex valida antes de que se alcance el límite de longitud.
+  </Tip>
+</ParamField>
+
+---
+
+## Validaciones de negocio
+
+Además de las anotaciones `[Required]`, `[StringLength]` y `[RegularExpression]` aplicadas directamente en el modelo, el sistema impone las siguientes reglas adicionales gestionadas en la capa de controlador (`ProveedorController`):
+
+<Accordion title="Unicidad del RUC">
+  Antes de insertar un nuevo proveedor o actualizar uno existente, el controlador consulta la base de datos para verificar que ningún otro registro tenga el mismo valor en el campo `Ruc`. Si se detecta un duplicado, se añade un error al `ModelState` y se retorna la vista con el mensaje de validación correspondiente, sin persistir el cambio.
+</Accordion>
+
+<Accordion title="Formato de celular peruano">
+  La expresión regular `^9(?!(\d)\1{7})\d{8}$` implementa dos reglas del formato peruano de telefonía móvil:
+
+  1. **Prefijo 9**: Todos los números de celular en Perú inician con el dígito `9`, independientemente de la operadora (Claro, Movistar, Entel, Bitel).
+  2. **Sin repetición total**: El grupo de captura `(?!(\d)\1{7})` es un _lookahead_ negativo que rechaza números donde los 8 dígitos siguientes al `9` inicial sean todos idénticos. Esto filtra números de prueba o claramente incorrectos como `999999999` o `988888888`.
+
+  Números válidos de ejemplo: `987654321`, `912345678`, `960123456`.
+</Accordion>
+
+<Accordion title="Bloqueo de eliminación con productos asociados">
+  La política `OnDelete: Restrict` configurada en `AppDbContext` impide eliminar un proveedor si tiene uno o más productos asociados en la tabla `Productos`. Cualquier intento de eliminación bajo esa condición resultará en una excepción de integridad referencial. La interfaz de usuario muestra un mensaje de error amigable en ese caso.
+
+  Para desactivar un proveedor sin eliminar su historial, se recomienda marcar como inactivos (`Activo = false`) todos sus productos antes de intentar la eliminación.
+</Accordion>
+
+---
+
+## Relaciones
+
+El modelo `Proveedor` participa en la siguiente relación definida en `AppDbContext.OnModelCreating`:
+
+### Productos (uno a muchos)
+
+```csharp
+modelBuilder.Entity<Producto>()
+    .HasOne(p => p.Proveedor)
+    .WithMany(pr => pr.Productos)
+    .HasForeignKey(p => p.Proveedor_ID)
+    .OnDelete(DeleteBehavior.Restrict);
+```
+
+La colección de navegación `Productos` (tipo `ICollection<Producto>`) expone todos los artículos del catálogo que son suministrados por este proveedor. La relación es **uno a muchos**: un proveedor puede abastecer múltiples productos, pero cada producto referencia un único proveedor a través de `Proveedor_ID`.
+
+<Note>
+  La colección `Productos` se inicializa como `new List<Producto>()` en el constructor implícito del modelo, por lo que nunca es `null` al acceder a ella desde código C#, incluso si el proveedor no tiene productos registrados.
+</Note>
+
+---
+
+## Código fuente
+
+```csharp
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace TiendaMiCholo.Models
+{
+    public class Proveedor
+    {
+        [Key, DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        public int IdProveedor { get; set; }
+
+        [Required(ErrorMessage = "La Razón Social es obligatoria")]
+        [StringLength(100)]
+        [RegularExpression(@"^[^0-9]+$",
+            ErrorMessage = "El nombre de la empresa no admite números.")]
+        public string RazonSocial { get; set; }
+
+        [Required(ErrorMessage = "El RUC es obligatorio")]
+        [StringLength(11)]
+        [RegularExpression(@"^\d{11}$",
+            ErrorMessage = "El RUC debe tener exactamente 11 dígitos numéricos.")]
+        public string Ruc { get; set; }
+
+        [StringLength(50)]
+        [RegularExpression(@"^9(?!(\d)\1{7})\d{8}$",
+            ErrorMessage = "El celular debe tener 9 dígitos, empezar con 9 y no tener todos los números iguales.")]
+        public string Telefono { get; set; }
+
+        public ICollection<Producto> Productos { get; set; } = new List<Producto>();
+    }
+}
+```

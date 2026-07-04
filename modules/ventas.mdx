@@ -1,0 +1,190 @@
+---
+title: "Registro de ventas: BOLETA, FACTURA y control de stock"
+sidebarTitle: "Ventas"
+description: "Registra ventas con búsqueda AJAX de productos, elige entre BOLETA y FACTURA, valida RUC y celular para facturas, y anula ventas restaurando el stock automáticamente."
+---
+
+El módulo de ventas permite registrar transacciones comerciales en tiempo real, con búsqueda dinámica de productos vía AJAX, soporte para dos tipos de comprobante (BOLETA y FACTURA) y gestión de estados. Al registrar una venta, el sistema descuenta el stock de cada producto automáticamente y crea los registros de `DetalleVenta` correspondientes. Todos los usuarios autenticados (rol **Admin** y **Vendedor**) pueden registrar y consultar ventas; la anulación también es accesible para ambos roles.
+
+## Registrar una venta
+
+<Steps>
+  <Step title="Navegar al formulario de registro">
+    Dirígete a `GET /Venta/Registrar`. El formulario se carga vacío — los productos **no** se precargan en la vista para evitar transferir catálogos de gran tamaño al cliente.
+  </Step>
+
+  <Step title="Buscar productos con AJAX">
+    Escribe el nombre o el código del producto en el campo de búsqueda. El campo realiza una petición al endpoint:
+
+    ```
+    GET /Venta/BuscarProductos?q={término}
+    ```
+
+    El servidor consulta los productos con `Activo = true` cuyo `Nombre` o `Codigo` contengan el término buscado, retorna un máximo de **20 resultados** y los serializa como JSON con los siguientes campos:
+
+    | Campo | Tipo | Descripción |
+    |---|---|---|
+    | `id` | `int` | `IdProducto` del producto. |
+    | `nombre` | `string` | Nombre del producto. |
+    | `codigo` | `string` | Código del producto. |
+    | `precio` | `decimal` | `PrecioVenta` actual. |
+    | `stock` | `int` | Stock disponible. |
+
+    Si el término de búsqueda está vacío o es solo espacios, el endpoint devuelve un arreglo JSON vacío `[]` sin consultar la base de datos.
+  </Step>
+
+  <Step title="Agregar productos al carrito">
+    Selecciona uno o más productos de los resultados y establece la cantidad deseada para cada uno. El sistema valida que la cantidad y el precio sean mayores a cero, y que el stock disponible sea suficiente antes de confirmar.
+  </Step>
+
+  <Step title="Completar la información del cliente">
+    Ingresa el nombre o razón social del cliente en el campo **Cliente**. Si se deja en blanco o solo contiene espacios, el sistema lo asigna automáticamente como `"Público en general"`.
+
+    ```csharp
+    cliente = string.IsNullOrWhiteSpace(cliente) ? "Público en general" : cliente.Trim();
+    ```
+  </Step>
+
+  <Step title="Seleccionar el tipo de comprobante">
+    Elige entre **BOLETA** o **FACTURA**. Los requisitos de validación difieren según el tipo seleccionado (ver sección [Tipos de comprobante](#tipos-de-comprobante)).
+  </Step>
+
+  <Step title="Completar campos adicionales para FACTURA">
+    Si el tipo de comprobante es **FACTURA**, el formulario requiere obligatoriamente:
+
+    - **Razón Social** (`Cliente`): no puede ser `"Público en general"`.
+    - **RUC** (`Ruc`): exactamente **11 dígitos numéricos**.
+    - **Celular** (`Celular`): exactamente **9 dígitos numéricos**, comenzando con `9`.
+
+    Para BOLETA, los campos `Ruc` y `Celular` se ignoran y se guardan como `null`.
+  </Step>
+
+  <Step title="Enviar el formulario">
+    Al hacer `POST /Venta/Registrar`, el sistema:
+
+    1. Crea el registro `Venta` con `FechaVenta = DateTime.Now`, `Estado = Activa` y `Total` calculado.
+    2. Para cada producto, verifica que `producto.Stock >= cantidad` solicitada.
+    3. Descuenta el stock: `producto.Stock = Math.Max(0, producto.Stock - cantidad)`.
+    4. Crea un registro `DetalleVenta` con `Venta_ID`, `Producto_ID`, `Cantidad` y `PrecioUnitario`.
+    5. Todo ocurre dentro de una **transacción de base de datos** — si cualquier paso falla, se ejecuta `RollbackAsync()` y se restaura el estado del carrito en la vista.
+  </Step>
+</Steps>
+
+<Tip>
+  Para BOLETA, dejar el nombre del cliente en blanco asigna automáticamente `"Público en general"` como valor del campo `Cliente`.
+</Tip>
+
+## Tipos de comprobante
+
+<Tabs>
+  <Tab title="BOLETA">
+    La BOLETA es el comprobante estándar para ventas al consumidor final. No requiere datos fiscales del cliente.
+
+    **Requisitos:**
+    - `Cliente`: opcional. Si está vacío, se usa `"Público en general"`.
+    - `Ruc`: **no requerido**. Se guarda como `null`.
+    - `Celular`: **no requerido**. Se guarda como `null`.
+
+    **Ejemplo de registro:**
+    ```json
+    {
+      "Cliente": "Público en general",
+      "TipoComprobante": "BOLETA",
+      "Ruc": null,
+      "Celular": null,
+      "Total": 45.50
+    }
+    ```
+  </Tab>
+  <Tab title="FACTURA">
+    La FACTURA es el comprobante para ventas a empresas o personas con RUC activo. Exige datos fiscales completos y válidos.
+
+    **Requisitos:**
+    - `Cliente` (Razón Social): requerido, **no puede ser** `"Público en general"`.
+    - `Ruc`: requerido, exactamente **11 dígitos numéricos** (`ruc.Length == 11 && ruc.All(char.IsDigit)`).
+    - `Celular`: requerido, exactamente **9 dígitos numéricos**, debe **comenzar con `9`** (`celular.StartsWith("9")`).
+
+    **Ejemplo de registro:**
+    ```json
+    {
+      "Cliente": "Distribuidora Los Andes SAC",
+      "TipoComprobante": "FACTURA",
+      "Ruc": "20601234567",
+      "Celular": "987654321",
+      "Total": 1250.00
+    }
+    ```
+
+    Si alguno de los campos requeridos no cumple el formato, el servidor rechaza la petición con un mensaje de error en `TempData["Error"]` y restaura el estado del carrito en la vista.
+  </Tab>
+</Tabs>
+
+## Historial de ventas
+
+```
+GET /Venta/Historial
+```
+
+Muestra todas las ventas registradas en el sistema, ordenadas por fecha de forma **descendente** (la más reciente primero). Cada venta incluye sus `DetallesVentas` con los productos asociados, cargados mediante `.Include(v => v.DetallesVentas).ThenInclude(d => d.Producto)`. Si ocurre un error al cargar el historial, se redirige al dashboard principal con un mensaje en `TempData["Error"]`.
+
+## Estados de venta
+
+El modelo `Venta` utiliza el enum `EstadoVenta` para controlar el ciclo de vida de cada transacción:
+
+| Valor | Descripción |
+|---|---|
+| `Activa` | Estado inicial. La venta fue registrada correctamente y el stock fue descontado. Es el valor por defecto (`Estado = EstadoVenta.Activa`). |
+| `Anulada` | La venta fue anulada por un usuario. El stock fue restaurado. La venta permanece en el historial. |
+
+## Anular una venta
+
+```
+GET /Venta/Eliminar/{id}
+```
+
+La anulación es una operación de **borrado lógico** (soft-delete): no elimina el registro de la base de datos, sino que cambia el estado de la venta a `Anulada` y restaura el stock de cada producto involucrado.
+
+El proceso completo ejecutado por el controlador es:
+
+```csharp
+// 1. Restaurar el stock de cada producto en el detalle
+foreach (var detalle in venta.DetallesVentas)
+{
+    var producto = await _context.Productos.FindAsync(detalle.Producto_ID);
+    if (producto != null)
+    {
+        producto.Stock += detalle.Cantidad;
+        _context.Productos.Update(producto);
+    }
+}
+
+// 2. Cambiar el estado y registrar quién anuló
+venta.Estado = EstadoVenta.Anulada;
+venta.ModificadoPor = User.Identity.Name;
+
+_context.Ventas.Update(venta);
+await _context.SaveChangesAsync();
+```
+
+El campo `ModificadoPor` registra el nombre de usuario (`User.Identity.Name`) del operador que realizó la anulación, lo que garantiza trazabilidad de auditoría.
+
+<Warning>
+  Anular una venta es irreversible. El stock se restaura automáticamente sumando las cantidades de cada `DetalleVenta`, pero la venta permanece en el historial con estado **Anulada**. No es posible reactivarla.
+</Warning>
+
+## Editar una venta
+
+```
+GET  /Venta/Editar/{id}   → Carga el formulario con los datos actuales
+POST /Venta/Editar/{id}   → Guarda los cambios
+```
+
+La edición de una venta existente está **limitada a tres campos**. El controlador solo actualiza los siguientes atributos del registro original:
+
+| Campo editable | Descripción |
+|---|---|
+| `Cliente` | Nombre o razón social del cliente. No puede estar vacío. |
+| `TipoComprobante` | Permite cambiar entre `BOLETA` y `FACTURA`. |
+| `Total` | Monto total de la venta. Debe ser mayor a cero. |
+
+Los `DetallesVentas` (productos y cantidades), el `RUC`, el `Celular`, la `FechaVenta` y el `Estado` **no se modifican** en esta acción. Si el ID del formulario no coincide con el ID de la URL, la operación se cancela con un error.

@@ -1,0 +1,105 @@
+---
+title: "Gestión de usuarios: crear, editar y eliminar cuentas"
+sidebarTitle: "Usuarios"
+description: "Administra las cuentas de usuario del sistema desde el panel Admin. Crea usuarios con rol, edita contraseñas y elimina cuentas con protección contra auto-eliminación."
+---
+
+El módulo de gestión de usuarios permite a los administradores de Tienda MiCholo crear, visualizar, editar y eliminar cuentas del sistema. Está implementado en `UsuarioController` y protegido en su totalidad con `[Authorize(Roles = "Admin")]`, lo que significa que ningún usuario con rol **Vendedor** —ni ningún visitante no autenticado— puede acceder a estas rutas. Toda la gestión de cuentas se realiza a través de ASP.NET Core Identity, usando `UserManager<IdentityUser>` y `RoleManager<IdentityRole>`.
+
+## Ver usuarios
+
+La acción `GET /Usuario/Index` recupera todos los usuarios registrados en el sistema y los presenta en una tabla. Por cada usuario se obtienen sus roles asociados y se construye un `UsuarioVM` con los siguientes campos:
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `Id` | `string` | Identificador único de Identity |
+| `Email` | `string` | Correo electrónico del usuario |
+| `Rol` | `string` | Nombre del rol asignado, o `"Sin Rol"` si no tiene ninguno |
+
+Si un usuario no tiene ningún rol asignado, el campo `Rol` mostrará el texto **"Sin Rol"** de forma predeterminada.
+
+## Crear usuario
+
+Para registrar una nueva cuenta de usuario en el sistema, sigue estos pasos:
+
+<Steps>
+  <Step title="Navega al formulario de creación">
+    Dirígete a `/Usuario/Crear`. La página cargará el formulario con la lista de roles disponibles en el sistema.
+  </Step>
+  <Step title="Completa el formulario">
+    Rellena todos los campos requeridos según el modelo `CrearUsuarioVM`:
+
+    | Campo | Validación | Descripción |
+    |---|---|---|
+    | **Correo Electrónico** | Requerido, formato de email válido | Será el `UserName` e `Email` de la cuenta en Identity |
+    | **Contraseña** | Requerida, mínimo 6 caracteres, máximo 100 | Contraseña inicial de la cuenta |
+    | **Confirmar contraseña** | Debe coincidir con el campo Contraseña | Confirmación para evitar errores tipográficos |
+    | **Rol** | Requerido | Seleccionado desde los roles disponibles en la base de datos |
+  </Step>
+  <Step title="Envía el formulario">
+    Al hacer clic en **Guardar**, el sistema:
+    1. Valida el modelo (`ModelState.IsValid`).
+    2. Crea el `IdentityUser` con `UserManager.CreateAsync`.
+    3. Asigna el rol seleccionado con `UserManager.AddToRoleAsync`.
+    4. Si ocurre algún error de Identity (por ejemplo, email duplicado), los errores se muestran en el formulario.
+  </Step>
+  <Step title="Redirección al listado">
+    Si la operación fue exitosa, el sistema establece `TempData["Mensaje"] = "Usuario creado exitosamente."` y redirige automáticamente a `/Usuario/Index`.
+  </Step>
+</Steps>
+
+## Editar usuario
+
+La ruta `GET /Usuario/Editar/{id}` carga el formulario de edición con los datos actuales del usuario identificado por su `Id`. El formulario usa el modelo `EditarUsuarioVM`:
+
+| Campo | Validación | Descripción |
+|---|---|---|
+| `Id` | Campo oculto (`hidden`) | Identifica al usuario que se está editando |
+| **Correo Electrónico** | Requerido, formato de email válido | Actualiza `Email` y `UserName` del usuario |
+| **Nueva Contraseña (Opcional)** | Opcional, mínimo 6 caracteres si se proporciona | Si se deja vacío, la contraseña actual no cambia |
+| **Confirmar nueva contraseña** | Debe coincidir con el campo Contraseña si se completó | Solo se valida cuando se ingresa una nueva contraseña |
+| **Rol** | Requerido | Nuevo rol a asignar |
+
+El flujo `POST /Usuario/Editar` realiza las siguientes operaciones en orden:
+
+1. **Actualiza email y username** con `UserManager.UpdateAsync`.
+2. **Actualiza el rol**: si el rol enviado difiere del rol actual, se eliminan **todos** los roles existentes con `RemoveFromRolesAsync` y luego se asigna el nuevo con `AddToRoleAsync`.
+3. **Actualiza la contraseña** (solo si el campo `Password` no está vacío): se genera un token de reseteo con `GeneratePasswordResetTokenAsync` y se aplica con `ResetPasswordAsync`.
+
+Si alguna operación falla, los errores de Identity se agregan al `ModelState` y el formulario se vuelve a mostrar con los mensajes correspondientes.
+
+## Eliminar usuario
+
+La acción `POST /Usuario/Eliminar` recibe el `id` del usuario a eliminar. Antes de proceder, el sistema ejecuta una verificación de seguridad crítica:
+
+```csharp
+if (user.UserName == User.Identity.Name)
+{
+    TempData["Error"] = "No puedes eliminar tu propia cuenta.";
+    return RedirectToAction("Index");
+}
+```
+
+Si la verificación pasa (es decir, el usuario a eliminar es distinto al usuario autenticado), se invoca `UserManager.DeleteAsync`. En caso de éxito, se establece `TempData["Mensaje"] = "Usuario eliminado exitosamente."` y se redirige al listado.
+
+<Warning>
+  Un administrador **no puede eliminar su propia cuenta**. Si se intenta realizar esta acción, el sistema bloquea la operación y muestra el error:
+
+  > "No puedes eliminar tu propia cuenta."
+
+  Esto garantiza que siempre exista al menos un administrador activo en el sistema.
+</Warning>
+
+<Note>
+  Los requisitos de contraseña están intencionalmente relajados para facilitar el desarrollo y las pruebas:
+
+  ```csharp
+  options.Password.RequireDigit = false;
+  options.Password.RequireLowercase = false;
+  options.Password.RequireNonAlphanumeric = false;
+  options.Password.RequireUppercase = false;
+  options.Password.RequiredLength = 6;
+  ```
+
+  El único requisito activo es una longitud mínima de **6 caracteres**. Para un entorno de producción, se recomienda activar las restricciones adicionales (`RequireDigit`, `RequireUppercase`, etc.) en `Program.cs`.
+</Note>

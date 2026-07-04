@@ -1,0 +1,133 @@
+---
+title: "Arquitectura de Tienda MiCholo: MVC, EF Core y Identity"
+sidebarTitle: "Arquitectura"
+description: "Visión general de la arquitectura MVC de Tienda MiCholo, sus capas principales, el flujo de una petición HTTP y las dependencias del proyecto."
+---
+
+Tienda MiCholo sigue el patrón **Model-View-Controller (MVC)** sobre ASP.NET Core 10. La aplicación separa claramente las responsabilidades en capas: los controladores orquestan la lógica de negocio, los modelos representan el dominio (productos, ventas, proveedores), y las vistas Razor generan el HTML final que recibe el navegador. La capa de datos utiliza **Entity Framework Core 10** con un proveedor SQL Server, mientras que la autenticación y autorización se delegan a **ASP.NET Core Identity**.
+
+## Capas del sistema
+
+<CardGroup cols={2}>
+  <Card title="Controllers" icon="bolt">
+    Siete controladores gestionan todas las rutas de la aplicación. Cada uno extiende `Controller` e inyecta `AppDbContext` o los servicios de Identity necesarios.
+
+    - `AccountController` — login, logout y acceso denegado
+    - `HomeController` — página de inicio y errores
+    - `ProductoController` — CRUD de productos y listado paginado
+    - `ProveedorController` — gestión de proveedores
+    - `ReporteController` — reportes de ventas y stock
+    - `UsuarioController` — administración de usuarios (solo Admin)
+    - `VentaController` — registro y anulación de ventas
+  </Card>
+
+  <Card title="Models" icon="database">
+    Entidades de dominio y enumeraciones que EF Core mapea a tablas SQL Server.
+
+    **Entidades**
+    - `Producto` — artículo del inventario
+    - `Proveedor` — empresa suministradora
+    - `Venta` — cabecera de una transacción de venta
+    - `DetalleVenta` — línea de detalle de una venta
+    - `VentaItem` — modelo temporal para el carrito en sesión
+
+    **Enumeraciones** (`Models/Enums/`)
+    - `EstadoVenta` — `Activa` | `Anulada`
+    - `TipoComprobante` — `BOLETA` | `FACTURA`
+  </Card>
+
+  <Card title="ViewModels" icon="eye">
+    Objetos de transferencia de datos entre controladores y vistas, con anotaciones de validación.
+
+    - `LoginViewModel` — credenciales del formulario de acceso
+    - `CrearUsuarioVM` — datos para registrar un nuevo usuario
+    - `EditarUsuarioVM` — datos para modificar un usuario existente
+    - `UsuarioVM` — representación de usuario para vistas de listado
+    - `DashboardViewModel` — métricas agregadas para el panel principal
+  </Card>
+
+  <Card title="Views" icon="window">
+    Vistas Razor (`.cshtml`) organizadas por carpetas que corresponden a cada controlador: `Account/`, `Home/`, `Producto/`, `Proveedor/`, `Reporte/`, `Usuario/`, `Venta/`. La carpeta `Shared/` aloja el layout principal y los parciales comunes.
+  </Card>
+
+  <Card title="Data" icon="server">
+    - `AppDbContext` — extiende `IdentityDbContext<IdentityUser>` y expone los `DbSet` del dominio. Configura relaciones y conversiones de enum en `OnModelCreating`.
+    - `SeedData` — siembra los roles `Admin` y `Vendedor`, crea las cuentas predeterminadas y carga productos desde `productos.json` al arrancar la aplicación.
+  </Card>
+
+  <Card title="Helpers" icon="wrench">
+    - `PaginatedList<T>` — clase genérica que envuelve `List<T>` y expone `PageIndex`, `TotalPages`, `HasPreviousPage` y `HasNextPage`. Crea páginas de resultados de forma asíncrona a partir de cualquier `IQueryable<T>` usando EF Core.
+  </Card>
+</CardGroup>
+
+## Flujo de una petición
+
+El siguiente diagrama muestra el ciclo de vida completo desde que el navegador realiza una petición HTTP hasta que recibe la respuesta HTML renderizada.
+
+<Steps>
+  <Step title="El router recibe la petición">
+    ASP.NET Core evalúa la ruta contra el patrón registrado en `Program.cs`:
+
+    ```csharp Program.cs
+    app.MapControllerRoute(
+        name: "default",
+        pattern: "{controller=Producto}/{action=Listar}/{id?}")
+        .WithStaticAssets();
+    ```
+
+    Si ningún segmento está presente, la ruta por defecto apunta a `Producto/Listar`.
+  </Step>
+
+  <Step title="Middleware de autenticación verifica la cookie">
+    `app.UseAuthentication()` inspecciona la cookie de sesión. Si el usuario no está autenticado y el recurso requiere identificación, el middleware redirige automáticamente a `/Account/Login`.
+  </Step>
+
+  <Step title="Autorización valida el rol">
+    `app.UseAuthorization()` evalúa los atributos `[Authorize]` y `[Authorize(Roles = "Admin")]` del controlador o la acción. Un usuario autenticado pero sin el rol necesario es redirigido a `/Account/AccessDenied`.
+  </Step>
+
+  <Step title="El controlador ejecuta la acción">
+    La acción correspondiente es invocada. Habitualmente consulta `AppDbContext` vía EF Core, aplica filtros o paginación con `PaginatedList<T>` y construye el ViewModel que pasará a la vista.
+  </Step>
+
+  <Step title="Razor renderiza la vista">
+    El motor Razor compila la vista `.cshtml` con el modelo recibido y genera el HTML final. Los layouts de `Shared/` envuelven el contenido con cabecera, barra de navegación y pie de página.
+  </Step>
+
+  <Step title="La respuesta llega al navegador">
+    ASP.NET Core envía la respuesta HTTP con el HTML generado. Los archivos estáticos (CSS, JS, imágenes) son servidos directamente por `MapStaticAssets()` sin pasar por el pipeline MVC.
+  </Step>
+</Steps>
+
+## Dependencias NuGet
+
+Todos los paquetes apuntan a la versión **10.0.9**, alineada con el target framework `net10.0`.
+
+| Paquete | Versión | Uso |
+|---|---|---|
+| `Microsoft.AspNetCore.Identity.EntityFrameworkCore` | 10.0.9 | Integración de ASP.NET Core Identity con EF Core; provee `IdentityDbContext` |
+| `Microsoft.EntityFrameworkCore` | 10.0.9 | ORM base; define `DbContext`, `DbSet` y la API fluent de configuración |
+| `Microsoft.EntityFrameworkCore.SqlServer` | 10.0.9 | Proveedor SQL Server; habilita `UseSqlServer()` en la configuración |
+| `Microsoft.EntityFrameworkCore.Design` | 10.0.9 | Herramientas en tiempo de diseño para generar migraciones (solo build) |
+| `Microsoft.EntityFrameworkCore.Tools` | 10.0.9 | CLI de `dotnet-ef`; necesario para `migrations add` y `database update` (solo build) |
+
+<Note>
+  Los paquetes `Microsoft.EntityFrameworkCore.Design` y `Microsoft.EntityFrameworkCore.Tools` tienen `<PrivateAssets>all</PrivateAssets>`, por lo que **no se incluyen en el artefacto publicado** de la aplicación. Solo se usan durante el desarrollo.
+</Note>
+
+## Namespace raíz
+
+Todo el código de la aplicación vive bajo el namespace raíz `TiendaMiCholo`, con los siguientes sub-namespaces:
+
+| Sub-namespace | Contenido |
+|---|---|
+| `TiendaMiCholo.Controllers` | Los siete controladores MVC |
+| `TiendaMiCholo.Models` | Entidades de dominio y `VentaItem` |
+| `TiendaMiCholo.Models.Enums` | `EstadoVenta`, `TipoComprobante` |
+| `TiendaMiCholo.ViewModels` | ViewModels de formularios y vistas |
+| `TiendaMiCholo.Data` | `AppDbContext`, `SeedData` |
+| `TiendaMiCholo.Helpers` | `PaginatedList<T>` |
+
+<Tip>
+  El proyecto usa `<ImplicitUsings>enable</ImplicitUsings>` y `<Nullable>enable</Nullable>`, por lo que los namespaces del sistema están disponibles globalmente y el compilador impone referencias anulables de forma estricta en todo el código.
+</Tip>

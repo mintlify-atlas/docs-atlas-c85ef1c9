@@ -1,0 +1,116 @@
+---
+title: "Gestión de proveedores con validación de RUC peruano"
+sidebarTitle: "Proveedores"
+description: "Crea, edita y elimina proveedores. El sistema valida el formato RUC peruano (11 dígitos) y bloquea la eliminación si el proveedor tiene productos activos."
+---
+
+El módulo de proveedores permite administrar el directorio de empresas o personas que abastecen el inventario de Tienda MiCholo. Cada producto del catálogo está vinculado a exactamente un proveedor mediante la clave foránea `Proveedor_ID`. El módulo completo está protegido por el atributo `[Authorize(Roles = "Admin")]` a nivel de controlador, por lo que únicamente los usuarios con rol **Admin** pueden acceder a cualquiera de sus vistas o acciones.
+
+## Campos del proveedor
+
+El modelo `Proveedor` define los siguientes campos con sus validaciones:
+
+| Campo | Tipo C# | Obligatorio | Validaciones |
+|---|---|---|---|
+| `IdProveedor` | `int` | — | Clave primaria, generada automáticamente por la base de datos. |
+| `RazonSocial` | `string` | ✅ Sí | Longitud máxima: **100** caracteres. **No puede contener dígitos** — regex: `^[^0-9]+$`. Mensaje de error: `"El nombre de la empresa no admite números."` |
+| `Ruc` | `string` | ✅ Sí | Longitud máxima y mínima: exactamente **11 caracteres**. Solo dígitos numéricos — regex: `^\d{11}$`. Debe ser **único** en todo el sistema (validado en el controlador). |
+| `Telefono` | `string` | ❌ No | Longitud máxima: **50** caracteres. Si se proporciona, debe tener **9 dígitos**, comenzar con `9` y no tener todos los dígitos iguales — regex: `^9(?!(\d)\1{7})\d{8}$`. |
+
+<Note>
+  El campo `Telefono` es opcional. Sin embargo, si se proporciona, debe cumplir estrictamente el formato de número celular peruano: 9 dígitos, comenzar en `9` y no ser una secuencia de dígitos repetidos (por ejemplo, `999999999` es rechazado).
+</Note>
+
+## Crear proveedor
+
+```
+GET  /Proveedor/Nuevo   → Formulario de alta
+POST /Proveedor/Nuevo   → Guarda el nuevo proveedor
+```
+
+El proceso de creación sigue los siguientes pasos:
+
+<Steps>
+  <Step title="Validar el modelo">
+    El servidor verifica el `ModelState`. Si alguna anotación de validación falla (formato de `RazonSocial`, formato de `Ruc`, formato de `Telefono`), se recarga el formulario con los errores correspondientes.
+  </Step>
+
+  <Step title="Verificar unicidad del RUC">
+    Antes de insertar el registro, el controlador consulta si ya existe otro proveedor con el mismo RUC:
+
+    ```csharp
+    bool rucExiste = await _context.Proveedores.AnyAsync(p => p.Ruc == proveedor.Ruc);
+    if (rucExiste)
+    {
+        ModelState.AddModelError("Ruc", "El RUC ingresado ya se encuentra registrado.");
+        return View(proveedor);
+    }
+    ```
+
+    Si el RUC ya está en uso, se muestra el error en el campo `Ruc` y no se guarda el registro.
+  </Step>
+
+  <Step title="Guardar el proveedor">
+    Si todas las validaciones pasan, el proveedor se agrega a la base de datos con `AddAsync` + `SaveChangesAsync`. El usuario es redirigido al listado (`GET /Proveedor/Listar`) con el mensaje `"Proveedor creado correctamente."` en `TempData["Success"]`.
+  </Step>
+</Steps>
+
+## Editar proveedor
+
+```
+GET  /Proveedor/Editar/{id}   → Carga el formulario con los datos actuales
+POST /Proveedor/Editar/{id}   → Guarda los cambios
+```
+
+La edición aplica las mismas validaciones de formato que el alta. La verificación de unicidad del RUC en edición excluye al propio registro mediante su `IdProveedor`, para permitir guardar sin cambiar el RUC:
+
+```csharp
+bool rucExiste = await _context.Proveedores.AnyAsync(
+    p => p.Ruc == proveedor.Ruc && p.IdProveedor != proveedor.IdProveedor
+);
+if (rucExiste)
+{
+    ModelState.AddModelError("Ruc", "El RUC ingresado ya se encuentra registrado en otro proveedor.");
+    return View(proveedor);
+}
+```
+
+Si el proveedor no existe (`FindAsync` retorna `null`), el servidor devuelve un `NotFound` (HTTP 404).
+
+## Eliminar proveedor
+
+```
+GET /Proveedor/Eliminar/{id}
+```
+
+Antes de eliminar físicamente el proveedor, el controlador verifica si existe al menos un producto vinculado a él a través de la FK `Proveedor_ID`:
+
+```csharp
+bool tieneProducto = await _context.Productos.AnyAsync(p => p.Proveedor_ID == id);
+if (tieneProducto)
+{
+    TempData["Error"] = "No se puede eliminar el proveedor porque posee productos asociados en el inventario.";
+    return RedirectToAction(nameof(Listar));
+}
+```
+
+Si el proveedor tiene productos asociados (independientemente de si están activos o inactivos), la eliminación queda **bloqueada** y el usuario es redirigido al listado con el mensaje de error. Solo los proveedores sin ningún producto en el catálogo pueden eliminarse de forma permanente.
+
+<Accordion title="¿Qué ocurre si el proveedor no se encuentra?">
+  Si el `IdProveedor` proporcionado no corresponde a ningún registro, el controlador redirige al listado con el mensaje `"Proveedor no encontrado."` en `TempData["Error"]`. No se produce ningún error HTTP no controlado.
+</Accordion>
+
+## Acceso restringido
+
+El controlador `ProveedorController` aplica el atributo `[Authorize(Roles = "Admin")]` a nivel de clase, lo que significa que **todas** sus rutas están restringidas al rol Admin:
+
+| Ruta | Método | Descripción |
+|---|---|---|
+| `/Proveedor/Listar` | `GET` | Lista todos los proveedores ordenados por razón social. |
+| `/Proveedor/Nuevo` | `GET` / `POST` | Formulario de alta y creación. |
+| `/Proveedor/Editar/{id}` | `GET` / `POST` | Formulario de edición y actualización. |
+| `/Proveedor/Eliminar/{id}` | `GET` | Eliminación con verificación de dependencias. |
+
+<Note>
+  Los usuarios con rol **Vendedor** no tienen acceso a ninguna ruta del módulo de proveedores. Cualquier intento de acceso directo a estas URLs resultará en una redirección a la página de acceso denegado configurada en la aplicación.
+</Note>

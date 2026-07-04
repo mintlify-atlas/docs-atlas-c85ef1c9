@@ -1,0 +1,255 @@
+---
+title: "VentaController: registro, búsqueda AJAX e historial de ventas"
+sidebarTitle: "VentaController"
+description: "Referencia del VentaController: registro de ventas con transacción DB, búsqueda AJAX de productos, historial, edición y anulación con restauración de stock."
+---
+
+`VentaController` gestiona el ciclo de vida completo de las ventas en Tienda MiCholo: desde el registro de nuevas ventas hasta la consulta del historial, la edición de datos de comprobante y la anulación con restauración automática de stock. El controller está decorado con `[Authorize]` a nivel de clase, por lo que **todas las acciones requieren sesión iniciada**. Recibe `AppDbContext` vía inyección de dependencias. El enum `TipoComprobante` (valores `BOLETA` / `FACTURA`) y `EstadoVenta` (valores `Activa` / `Anulada`) provienen del namespace `TiendaMiCholo.Models.Enums`.
+
+---
+
+### GET /Venta/Registrar
+
+Muestra el formulario vacío para registrar una nueva venta.
+
+**Autorización:** `[Authorize]` (cualquier usuario autenticado).
+
+**Comportamiento:**
+- Devuelve la vista sin enviar la lista de productos al modelo, ya que la búsqueda de productos se realiza dinámicamente vía AJAX mediante el endpoint `BuscarProductos`.
+
+**Retorno:** `View()`.
+
+```csharp
+[HttpGet]
+public async Task<IActionResult> Registrar()
+```
+
+---
+
+### GET /Venta/BuscarProductos
+
+Endpoint AJAX que busca productos activos por nombre o código para poblar el carrito en tiempo real.
+
+**Autorización:** `[Authorize]` (cualquier usuario autenticado).
+
+<ParamField query="q" type="string" required>
+  Texto de búsqueda. Se compara contra `Nombre` y `Codigo` del producto usando `Contains`. Si está vacío o es solo espacios, devuelve un array JSON vacío inmediatamente.
+</ParamField>
+
+<Note>
+  Este endpoint devuelve JSON, no una vista Razor. Está pensado para ser consumido con `fetch` o `XMLHttpRequest` desde el formulario de registro de ventas. Devuelve como máximo **20 resultados** y solo incluye productos con `Activo == true`.
+</Note>
+
+**Forma del response JSON:**
+
+```csharp
+// Array de hasta 20 objetos anónimos
+new {
+    id     = int,      // IdProducto
+    nombre = string,   // Nombre del producto
+    codigo = string,   // Código SKU
+    precio = decimal,  // PrecioVenta
+    stock  = int       // Stock disponible actual
+}
+```
+
+**Retorno:** `Json(List<object>)` — array JSON o array vacío `[]`.
+
+```csharp
+[HttpGet]
+public async Task<IActionResult> BuscarProductos(string q)
+```
+
+---
+
+### POST /Venta/Registrar
+
+Registra una nueva venta completa envolviendo todo el proceso en una **transacción de base de datos**.
+
+**Autorización:** `[Authorize]` (cualquier usuario autenticado). Incluye `[ValidateAntiForgeryToken]`.
+
+<ParamField body="productoIds" type="int[]" required>
+  Array de identificadores de producto (`IdProducto`) en el orden del carrito.
+</ParamField>
+
+<ParamField body="cantidades" type="int[]" required>
+  Array de cantidades solicitadas, indexado en paralelo con `productoIds`.
+</ParamField>
+
+<ParamField body="precios" type="decimal[]" required>
+  Array de precios unitarios aplicados, indexado en paralelo con `productoIds`.
+</ParamField>
+
+<ParamField body="cliente" type="string" required>
+  Nombre o razón social del cliente. Si se omite o está vacío, se asigna automáticamente `"Público en general"`.
+</ParamField>
+
+<ParamField body="tipoComprobante" type="TipoComprobante" required>
+  Tipo de comprobante: `BOLETA` o `FACTURA`.
+</ParamField>
+
+<ParamField body="ruc" type="string" optional>
+  RUC del cliente. **Obligatorio y debe tener exactamente 11 dígitos numéricos** cuando `tipoComprobante == FACTURA`.
+</ParamField>
+
+<ParamField body="celular" type="string" optional>
+  Celular del cliente. **Obligatorio, debe tener 9 dígitos numéricos y comenzar con `9`** cuando `tipoComprobante == FACTURA`. Para `BOLETA` se ignora y se establece como `null`.
+</ParamField>
+
+**Validaciones previas a la transacción:**
+
+<Steps>
+  <Step title="Arrays no vacíos">
+    `productoIds` debe contener al menos un elemento; de lo contrario se establece `TempData["Error"]` y se devuelve el formulario.
+  </Step>
+  <Step title="Consistencia de longitudes">
+    `cantidades.Length` y `precios.Length` deben ser iguales a `productoIds.Length`. Si no coinciden, se devuelve error.
+  </Step>
+  <Step title="Validaciones de FACTURA">
+    Si `tipoComprobante == FACTURA`: el cliente no puede ser `"Público en general"`, el RUC debe tener 11 dígitos numéricos y el celular debe tener 9 dígitos empezando por `9`.
+  </Step>
+  <Step title="Cantidades y precios positivos">
+    Dentro de la transacción, `cantidades[i] > 0` y `precios[i] > 0` para cada línea.
+  </Step>
+</Steps>
+
+**Flujo dentro de la transacción (`BeginTransactionAsync`):**
+
+1. Calcula el `Total` sumando `cantidades[i] * precios[i]` para todos los ítems.
+2. Crea y persiste el registro `Venta` con `FechaVenta = DateTime.Now`.
+3. Para cada ítem del carrito:
+   - Busca el `Producto` con `FindAsync`.
+   - Verifica que `producto.Stock >= cantidades[i]`.
+   - Descuenta el stock: `producto.Stock = Math.Max(0, producto.Stock - cant)`.
+   - Crea el registro `DetalleVenta` asociado a la venta.
+4. Llama a `SaveChangesAsync` y `CommitAsync`.
+
+<Warning>
+  Si el stock de **cualquier producto** es insuficiente durante el procesamiento del carrito, se ejecuta `RollbackAsync` de forma inmediata, revirtiendo todos los cambios incluyendo la cabecera de venta ya insertada. Se establece `TempData["Error"]` con el nombre del producto y el stock disponible, y se restaura el estado del formulario.
+</Warning>
+
+**Retorno:** `RedirectToAction("Historial")` en éxito · `View()` en error (con el estado del carrito restaurado en `ViewBag.RestoredCart`).
+
+```csharp
+[HttpPost]
+[ValidateAntiForgeryToken]
+public async Task<IActionResult> Registrar(
+    int[] productoIds,
+    int[] cantidades,
+    decimal[] precios,
+    string cliente,
+    TipoComprobante tipoComprobante,
+    string? ruc,
+    string? celular)
+```
+
+---
+
+### GET /Venta/Historial
+
+Devuelve el historial completo de ventas ordenado por fecha descendente.
+
+**Autorización:** `[Authorize]` (cualquier usuario autenticado).
+
+**Comportamiento:**
+- Consulta `_context.Ventas` con `.Include(v => v.DetallesVentas).ThenInclude(d => d.Producto)` para cargar la navegación completa.
+- Ordena por `FechaVenta` descendente (`OrderByDescending`).
+- En caso de excepción, establece `TempData["Error"]` y redirige a `Home/Index`.
+
+**Retorno:** `View(List<Venta>)`.
+
+```csharp
+[HttpGet]
+public async Task<IActionResult> Historial()
+```
+
+---
+
+### GET /Venta/Editar/{id}
+
+Muestra el formulario de edición para una venta existente.
+
+**Autorización:** `[Authorize]` (cualquier usuario autenticado).
+
+<ParamField path="id" type="int" required>
+  Identificador de la venta (`IdVenta`).
+</ParamField>
+
+**Comportamiento:**
+- Carga la venta con `Include(v => v.DetallesVentas).ThenInclude(d => d.Producto)`.
+- Si no existe, establece `TempData["Error"]` y redirige a `Historial`.
+- Inyecta en `ViewBag.Productos` la lista completa de productos (para dropdowns en la vista).
+
+**Retorno:** `View(Venta)` · `RedirectToAction("Historial")` si no se encuentra.
+
+```csharp
+[HttpGet]
+public async Task<IActionResult> Editar(int id)
+```
+
+---
+
+### POST /Venta/Editar
+
+Actualiza los datos de cabecera de una venta. **No modifica los DetalleVenta ni el stock.**
+
+**Autorización:** `[Authorize]` (cualquier usuario autenticado). Incluye `[ValidateAntiForgeryToken]`.
+
+<ParamField body="id" type="int" required>
+  Identificador de la venta. Debe coincidir con `venta.IdVenta`; de lo contrario se devuelve error.
+</ParamField>
+
+<ParamField body="venta" type="Venta" required>
+  Objeto `Venta` con los datos actualizados desde el formulario.
+</ParamField>
+
+**Campos que se actualizan:**
+
+| Campo             | Descripción                           |
+|-------------------|---------------------------------------|
+| `Cliente`         | Nombre o razón social del cliente.    |
+| `TipoComprobante` | `BOLETA` o `FACTURA`.                 |
+| `Total`           | Monto total de la venta.              |
+
+<Note>
+  Solo se actualizan `Cliente`, `TipoComprobante` y `Total`. El resto de campos (`FechaVenta`, `Estado`, `Ruc`, `Celular`, `ModificadoPor`) no se modifican en esta acción.
+</Note>
+
+**Retorno:** `RedirectToAction("Historial")` en éxito · `View(Venta)` en error.
+
+```csharp
+[HttpPost]
+[ValidateAntiForgeryToken]
+public async Task<IActionResult> Editar(int id, Venta venta)
+```
+
+---
+
+### GET /Venta/Eliminar/{id}
+
+Anula una venta (soft-delete) y restaura el stock de los productos involucrados.
+
+**Autorización:** `[Authorize]` (cualquier usuario autenticado).
+
+<ParamField path="id" type="int" required>
+  Identificador de la venta (`IdVenta`).
+</ParamField>
+
+**Comportamiento:**
+- Carga la venta con `Include(v => v.DetallesVentas)`.
+- Si no existe, establece `TempData["Error"]` y redirige a `Historial`.
+- Para cada `DetalleVenta`, suma `detalle.Cantidad` de vuelta al `Stock` del producto correspondiente.
+- Establece `venta.Estado = EstadoVenta.Anulada`.
+- Registra el usuario responsable en `venta.ModificadoPor = User.Identity.Name`.
+- Persiste todos los cambios en una sola llamada a `SaveChangesAsync`.
+
+<Note>
+  La anulación es un **soft-delete**: el registro `Venta` y sus `DetallesVentas` se conservan en la base de datos con `Estado = Anulada`. El registro no se elimina físicamente.
+</Note>
+
+**Retorno:** `RedirectToAction("Historial")` en todos los casos (anulado o error).
+
+```csharp
+[HttpGet]
+public async Task<IActionResult> Eliminar(int id)
+```

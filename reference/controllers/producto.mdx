@@ -1,0 +1,257 @@
+---
+title: "ProductoController: rutas, parámetros y autorización"
+sidebarTitle: "ProductoController"
+description: "Referencia de todas las acciones del ProductoController: listado paginado, creación, edición, toggle de estado y eliminación de productos. Requiere rol Admin para escritura."
+---
+
+`ProductoController` gestiona todas las operaciones CRUD sobre el catálogo de productos de Tienda MiCholo. El controller está decorado con `[Authorize]` a nivel de clase, lo que significa que **todas las acciones exigen sesión iniciada**. Las acciones de escritura (crear, editar, cambiar estado y eliminar) añaden además `[Authorize(Roles = "Admin")]`, restringiendo esas rutas únicamente al rol Admin. El controller recibe `AppDbContext` vía inyección de dependencias y utiliza `PaginatedList<T>` del namespace `TiendaMiCholo.Helpers` para el listado paginado.
+
+---
+
+### GET /Producto/Listar
+
+Devuelve el listado paginado de productos con soporte de búsqueda y filtros combinados.
+
+<ParamField query="buscarNombre" type="string" optional>
+  Filtra productos cuyo `Nombre` contenga el texto indicado (búsqueda parcial con `Contains`).
+</ParamField>
+
+<ParamField query="filtrarCategoria" type="string" optional>
+  Filtra productos que tengan exactamente la `Categoria` especificada.
+</ParamField>
+
+<ParamField query="filtrarProveedor" type="int" optional>
+  Filtra productos por `Proveedor_ID`.
+</ParamField>
+
+<ParamField query="pageNumber" type="int" optional>
+  Número de página a mostrar. Si se omite, se asume la página `1`. Tamaño de página fijo: **10 registros**.
+</ParamField>
+
+**Autorización:** `[Authorize]` (cualquier usuario autenticado).
+
+**Comportamiento:**
+- Construye una consulta sobre `_context.Productos.Include(p => p.Proveedor)` y aplica los filtros de forma encadenada.
+- Almacena los valores de filtro activos en `ViewBag.BuscarNombre`, `ViewBag.FiltrarCategoria` y `ViewBag.FiltrarProveedor` para repoblar los controles del formulario.
+- Inyecta en `ViewBag`:
+  - `ViewBag.Categorias` — lista de categorías distintas (`SELECT DISTINCT Categoria`).
+  - `ViewBag.Proveedores` — lista de proveedores ordenados por `RazonSocial`.
+  - `ViewBag.ProductosCriticos` — hasta 10 productos con `Stock <= 5`, ordenados por stock ascendente.
+- Ordena los resultados finales por `Nombre` antes de paginar.
+
+**Retorno:** `View(PaginatedList<Producto>)`.
+
+```csharp
+[HttpGet]
+public async Task<IActionResult> Listar(
+    string buscarNombre,
+    string filtrarCategoria,
+    int? filtrarProveedor,
+    int? pageNumber)
+```
+
+---
+
+### GET /Producto/DashboardAlertas
+
+Devuelve la vista de alertas de stock crítico, mostrando todos los productos cuyo `Stock` sea menor o igual a 5.
+
+**Autorización:** `[Authorize]` (cualquier usuario autenticado).
+
+**Comportamiento:**
+- Consulta `_context.Productos` con `Include(p => p.Proveedor)` para mostrar datos del proveedor junto a cada alerta.
+- Aplica `Where(p => p.Stock <= 5)` y ordena por stock ascendente.
+
+**Retorno:** `View(List<Producto>)`.
+
+```csharp
+[HttpGet]
+public async Task<IActionResult> DashboardAlertas()
+```
+
+---
+
+### GET /Producto/Categorias
+
+Devuelve una vista agregada que agrupa el catálogo por categoría.
+
+**Autorización:** `[Authorize]` (cualquier usuario autenticado).
+
+**Comportamiento:**
+- Agrupa `_context.Productos` por `Categoria`.
+- Para cada grupo proyecta un objeto anónimo con:
+  - `Nombre` — nombre de la categoría (clave del grupo).
+  - `CantidadProductos` — cantidad de productos en esa categoría.
+  - `ValorTotal` — suma de `PrecioVenta * Stock` de todos los productos del grupo.
+- Ordena los grupos por nombre de categoría ascendente.
+- Almacena la lista resultante en `ViewBag.CategoriasStats`.
+
+**Retorno:** `View()` (sin modelo directo; datos expuestos vía `ViewBag.CategoriasStats`).
+
+```csharp
+[HttpGet]
+public async Task<IActionResult> Categorias()
+```
+
+---
+
+### GET /Producto/Nuevo
+
+Muestra el formulario de alta de producto.
+
+**Autorización:** `[Authorize(Roles = "Admin")]`.
+
+**Comportamiento:**
+- Carga en `ViewBag.CategoriasExistentes` las categorías ya registradas (para el datalist o dropdown de autocompletado).
+- Carga en `ViewBag.Proveedores` todos los proveedores disponibles.
+
+**Retorno:** `View()` (formulario vacío).
+
+```csharp
+[HttpGet]
+[Authorize(Roles = "Admin")]
+public IActionResult Nuevo()
+```
+
+---
+
+### POST /Producto/Nuevo
+
+Procesa la creación de un nuevo producto tras validar el modelo y reglas de negocio.
+
+**Autorización:** `[Authorize(Roles = "Admin")]`. Incluye `[ValidateAntiForgeryToken]`.
+
+<ParamField body="producto" type="Producto" required>
+  Objeto `Producto` enlazado desde el formulario. Las propiedades de navegación `Proveedor` y `DetallesVentas` se eliminan de `ModelState` antes de validar.
+</ParamField>
+
+**Validaciones adicionales (reglas de negocio):**
+
+<Warning>
+  Si `PrecioVenta < PrecioCompra`, se añade un error de modelo en el campo `PrecioVenta`: _"El precio de venta no puede ser menor al de compra."_ y se devuelve el formulario.
+</Warning>
+
+<Warning>
+  Si `FechaVencimiento` tiene valor y es anterior a la fecha de hoy (`DateOnly.FromDateTime(DateTime.Now)`), se añade un error de modelo en `FechaVencimiento`: _"La fecha de vencimiento no puede ser una fecha pasada."_ y se devuelve el formulario.
+</Warning>
+
+**Comportamiento en éxito:**
+- Persiste el producto con `AddAsync` + `SaveChangesAsync`.
+- Establece `TempData["Success"]` y redirige a `Listar`.
+
+**Comportamiento en error:**
+- Recarga `ViewBag.CategoriasExistentes` y `ViewBag.Proveedores`.
+- Devuelve `View(producto)` con los errores de validación.
+
+**Retorno:** `RedirectToAction("Listar")` en éxito · `View(Producto)` en error.
+
+```csharp
+[HttpPost]
+[ValidateAntiForgeryToken]
+[Authorize(Roles = "Admin")]
+public async Task<IActionResult> Nuevo(Producto producto)
+```
+
+---
+
+### GET /Producto/Editar/{id}
+
+Muestra el formulario de edición para el producto indicado.
+
+**Autorización:** `[Authorize(Roles = "Admin")]`.
+
+<ParamField path="id" type="int" required>
+  Identificador del producto (`IdProducto`).
+</ParamField>
+
+**Comportamiento:**
+- Busca el producto con `FirstOrDefaultAsync(p => p.IdProducto == id)`.
+- Si no existe, establece `TempData["Error"]` y redirige a `Listar`.
+- Carga `ViewBag.CategoriasExistentes` y `ViewBag.Proveedores`.
+
+**Retorno:** `View(Producto)` · `RedirectToAction("Listar")` si no se encuentra.
+
+```csharp
+[HttpGet]
+[Authorize(Roles = "Admin")]
+public async Task<IActionResult> Editar(int id)
+```
+
+---
+
+### POST /Producto/Editar
+
+Procesa la actualización de un producto existente. Aplica las mismas validaciones de negocio que `POST /Producto/Nuevo`.
+
+**Autorización:** `[Authorize(Roles = "Admin")]`. Incluye `[ValidateAntiForgeryToken]`.
+
+<ParamField body="producto" type="Producto" required>
+  Objeto `Producto` con los datos actualizados, incluyendo `IdProducto` para identificar el registro. Las propiedades de navegación `Proveedor` y `DetallesVentas` se eliminan de `ModelState`.
+</ParamField>
+
+**Comportamiento en éxito:**
+- Llama a `_context.Productos.Update(producto)` + `SaveChangesAsync`.
+- Establece `TempData["Success"]` y redirige a `Listar`.
+
+**Retorno:** `RedirectToAction("Listar")` en éxito · `View(Producto)` en error.
+
+```csharp
+[HttpPost]
+[ValidateAntiForgeryToken]
+[Authorize(Roles = "Admin")]
+public async Task<IActionResult> Editar(Producto producto)
+```
+
+---
+
+### POST /Producto/ToggleActivo
+
+Invierte el estado `Activo` (habilitado/deshabilitado) del producto indicado.
+
+**Autorización:** `[Authorize(Roles = "Admin")]`.
+
+<ParamField body="id" type="int" required>
+  Identificador del producto (`IdProducto`).
+</ParamField>
+
+**Comportamiento:**
+- Localiza el producto con `FindAsync(id)`.
+- Si existe, ejecuta `producto.Activo = !producto.Activo` y persiste el cambio.
+- Establece `TempData["Success"]` con el nombre del producto y el nuevo estado (_"activado"_ / _"desactivado"_).
+- Si no existe, redirige a `Listar` sin acción.
+
+**Retorno:** `RedirectToAction("Listar")` en todos los casos.
+
+```csharp
+[HttpPost]
+[Authorize(Roles = "Admin")]
+public async Task<IActionResult> ToggleActivo(int id)
+```
+
+---
+
+### GET /Producto/Eliminar/{id}
+
+Elimina definitivamente un producto del catálogo, siempre que no esté referenciado en ventas.
+
+**Autorización:** `[Authorize(Roles = "Admin")]`.
+
+<ParamField path="id" type="int" required>
+  Identificador del producto (`IdProducto`).
+</ParamField>
+
+<Warning>
+  Antes de eliminar, el controller verifica si existe algún `DetalleVenta` con `Producto_ID == id` mediante `AnyAsync`. Si se encuentra al menos uno, la eliminación es **bloqueada** y se establece `TempData["Error"]` con el mensaje: _"No se puede eliminar el producto porque esta registrado en transacciones de venta existentes."_
+</Warning>
+
+**Comportamiento en éxito:**
+- Llama a `_context.Productos.Remove(producto)` + `SaveChangesAsync`.
+- Establece `TempData["Success"]`.
+
+**Retorno:** `RedirectToAction("Listar")` en todos los casos (bloqueado o eliminado).
+
+```csharp
+[HttpGet]
+[Authorize(Roles = "Admin")]
+public async Task<IActionResult> Eliminar(int id)
+```

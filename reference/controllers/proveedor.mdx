@@ -1,0 +1,158 @@
+---
+title: "ProveedorController: CRUD de proveedores (solo Admin)"
+sidebarTitle: "ProveedorController"
+description: "Referencia del ProveedorController: listar, crear, editar y eliminar proveedores. Todo el controlador requiere rol Admin. Valida unicidad de RUC y protege relaciones."
+---
+
+`ProveedorController` gestiona el mantenimiento del catálogo de proveedores de Tienda MiCholo. El controller está decorado con `[Authorize(Roles = "Admin")]` a **nivel de clase**, lo que significa que **todas sus acciones están restringidas exclusivamente al rol Admin** — ningún usuario con rol distinto puede acceder a ninguna ruta de este controller. Recibe `AppDbContext` vía inyección de dependencias. El modelo `Proveedor` requiere `RazonSocial` (sin números), `Ruc` (11 dígitos) y `Telefono` (9 dígitos comenzando en 9, sin repeticiones).
+
+---
+
+### GET /Proveedor/Listar
+
+Devuelve la lista completa de proveedores registrados, ordenada alfabéticamente.
+
+**Autorización:** `[Authorize(Roles = "Admin")]` (heredado de clase).
+
+**Comportamiento:**
+- Consulta `_context.Proveedores` y ordena por `RazonSocial` ascendente. Usa `?? string.Empty` como valor de ordenación cuando `RazonSocial` es `null`.
+
+**Retorno:** `View(List<Proveedor>)`.
+
+```csharp
+[HttpGet]
+public async Task<IActionResult> Listar()
+```
+
+---
+
+### GET /Proveedor/Nuevo
+
+Muestra el formulario vacío para registrar un nuevo proveedor.
+
+**Autorización:** `[Authorize(Roles = "Admin")]` (heredado de clase).
+
+**Retorno:** `View()`.
+
+```csharp
+[HttpGet]
+public IActionResult Nuevo()
+```
+
+---
+
+### POST /Proveedor/Nuevo
+
+Procesa el alta de un nuevo proveedor, validando el modelo y la unicidad del RUC.
+
+**Autorización:** `[Authorize(Roles = "Admin")]` (heredado de clase). Incluye `[ValidateAntiForgeryToken]`.
+
+<ParamField body="proveedor" type="Proveedor" required>
+  Objeto `Proveedor` enlazado desde el formulario. Debe incluir `RazonSocial`, `Ruc` y opcionalmente `Telefono`.
+</ParamField>
+
+**Flujo de validación:**
+
+<Steps>
+  <Step title="Validación del ModelState">
+    Si `ModelState` no es válido (p. ej. RUC con formato incorrecto, razón social con números), devuelve `View(proveedor)` con los errores de anotaciones de datos.
+  </Step>
+  <Step title="Unicidad de RUC">
+    Ejecuta `AnyAsync(p => p.Ruc == proveedor.Ruc)`. Si ya existe un proveedor con ese RUC, añade un error de modelo en el campo `Ruc`: _"El RUC ingresado ya se encuentra registrado."_ y devuelve el formulario.
+  </Step>
+  <Step title="Persistencia">
+    Llama a `AddAsync` + `SaveChangesAsync`. En éxito, establece `TempData["Success"]` y redirige a `Listar`.
+  </Step>
+</Steps>
+
+**Retorno:** `RedirectToAction("Listar")` en éxito · `View(Proveedor)` en error.
+
+```csharp
+[HttpPost]
+[ValidateAntiForgeryToken]
+public async Task<IActionResult> Nuevo(Proveedor proveedor)
+```
+
+---
+
+### GET /Proveedor/Editar/{id}
+
+Muestra el formulario de edición para el proveedor indicado.
+
+**Autorización:** `[Authorize(Roles = "Admin")]` (heredado de clase).
+
+<ParamField path="id" type="int" required>
+  Identificador del proveedor (`IdProveedor`).
+</ParamField>
+
+**Comportamiento:**
+- Busca el proveedor con `FirstOrDefaultAsync(p => p.IdProveedor == id)`.
+- Si no existe, devuelve `NotFound()` (HTTP 404).
+
+**Retorno:** `View(Proveedor)` · `NotFound()` si no se encuentra.
+
+```csharp
+[HttpGet]
+public async Task<IActionResult> Editar(int id)
+```
+
+---
+
+### POST /Proveedor/Editar
+
+Procesa la actualización de un proveedor existente, con la misma validación de unicidad de RUC pero excluyendo el registro actual.
+
+**Autorización:** `[Authorize(Roles = "Admin")]` (heredado de clase). Incluye `[ValidateAntiForgeryToken]`.
+
+<ParamField body="proveedor" type="Proveedor" required>
+  Objeto `Proveedor` con los datos actualizados, incluyendo `IdProveedor` para identificar el registro.
+</ParamField>
+
+**Flujo de validación:**
+
+<Steps>
+  <Step title="Validación del ModelState">
+    Si el modelo no es válido, devuelve `View(proveedor)` con errores.
+  </Step>
+  <Step title="Unicidad de RUC (excluyendo el registro actual)">
+    Ejecuta `AnyAsync(p => p.Ruc == proveedor.Ruc && p.IdProveedor != proveedor.IdProveedor)`. Si otro proveedor tiene ese RUC, añade error en campo `Ruc`: _"El RUC ingresado ya se encuentra registrado en otro proveedor."_
+  </Step>
+  <Step title="Actualización">
+    Llama a `_context.Proveedores.Update(proveedor)` + `SaveChangesAsync`. En éxito, establece `TempData["Success"]` y redirige a `Listar`.
+  </Step>
+</Steps>
+
+**Retorno:** `RedirectToAction("Listar")` en éxito · `View(Proveedor)` en error.
+
+```csharp
+[HttpPost]
+[ValidateAntiForgeryToken]
+public async Task<IActionResult> Editar(Proveedor proveedor)
+```
+
+---
+
+### GET /Proveedor/Eliminar/{id}
+
+Elimina definitivamente un proveedor del sistema, siempre que no tenga productos asociados en el inventario.
+
+**Autorización:** `[Authorize(Roles = "Admin")]` (heredado de clase).
+
+<ParamField path="id" type="int" required>
+  Identificador del proveedor (`IdProveedor`).
+</ParamField>
+
+<Warning>
+  Antes de eliminar, el controller verifica si el proveedor tiene productos vinculados mediante `AnyAsync(p => p.Proveedor_ID == id)` sobre la tabla `Productos`. Si se encuentra al menos uno, la eliminación es **bloqueada** con el mensaje: _"No se puede eliminar el proveedor porque posee productos asociados en el inventario."_ Para poder eliminar el proveedor, primero deben reasignarse o eliminarse todos sus productos.
+</Warning>
+
+**Comportamiento en éxito:**
+- Llama a `_context.Proveedores.Remove(proveedor)` + `SaveChangesAsync`.
+- Establece `TempData["Success"]`.
+
+**Retorno:** `RedirectToAction("Listar")` en todos los casos (bloqueado o eliminado).
+
+```csharp
+[HttpGet]
+public async Task<IActionResult> Eliminar(int id)
+```

@@ -1,0 +1,122 @@
+---
+title: "Roles y permisos: Admin y Vendedor en Tienda MiCholo"
+sidebarTitle: "Roles y Permisos"
+description: "Conoce los dos roles integrados del sistema: Admin con acceso total y Vendedor con permisos de venta. Aprende cómo se aplican las restricciones por controlador."
+---
+
+Tienda MiCholo utiliza el sistema de control de acceso basado en roles (RBAC) de **ASP.NET Core Identity**. Cada usuario del sistema tiene asignado exactamente un rol, y ese rol determina a qué secciones de la aplicación puede acceder. Los roles se crean automáticamente al iniciar la aplicación a través de `SeedData.Initialize` y se aplican mediante atributos `[Authorize]` y `[Authorize(Roles = "...")]` en los controladores. Las rutas protegidas redirigen a los usuarios no autenticados a `/Account/Login` y a los usuarios sin permisos suficientes a `/Account/AccessDenied`.
+
+## Roles disponibles
+
+El sistema incluye dos roles integrados que se crean al iniciar la aplicación por primera vez:
+
+| Rol | Descripción | Accesos |
+|---|---|---|
+| **Admin** | Administrador total del sistema | Inventario (CRUD completo), Proveedores (CRUD completo), Usuarios (CRUD completo), Ventas (registrar y ver), Reportes, Dashboard |
+| **Vendedor** | Personal de ventas | Ver inventario y categorías, Registrar y ver ventas, Ver reportes, Dashboard |
+
+## Restricciones por módulo
+
+Cada controlador tiene su propia estrategia de autorización. A continuación se detalla cómo está protegido cada módulo:
+
+<AccordionGroup>
+  <Accordion title="ProductoController — Inventario">
+    La clase entera está marcada con `[Authorize]`, por lo que **tanto Admin como Vendedor** pueden acceder al inventario. Sin embargo, las acciones de escritura (crear, editar, activar/desactivar y eliminar) tienen además `[Authorize(Roles = "Admin")]`, lo que las restringe exclusivamente al rol administrador.
+
+    | Acción | Restricción |
+    |---|---|
+    | `Listar` | `[Authorize]` — ambos roles |
+    | `DashboardAlertas` | `[Authorize]` — ambos roles |
+    | `Categorias` | `[Authorize]` — ambos roles |
+    | `Nuevo` (GET y POST) | `[Authorize(Roles = "Admin")]` |
+    | `Editar` (GET y POST) | `[Authorize(Roles = "Admin")]` |
+    | `ToggleActivo` | `[Authorize(Roles = "Admin")]` |
+    | `Eliminar` | `[Authorize(Roles = "Admin")]` |
+  </Accordion>
+
+  <Accordion title="ProveedorController — Proveedores">
+    La clase completa está decorada con `[Authorize(Roles = "Admin")]`. Ninguna acción de este controlador es accesible para usuarios con rol **Vendedor**.
+
+    | Acción | Restricción |
+    |---|---|
+    | `Listar` | `[Authorize(Roles = "Admin")]` |
+    | `Nuevo` (GET y POST) | `[Authorize(Roles = "Admin")]` |
+    | `Editar` (GET y POST) | `[Authorize(Roles = "Admin")]` |
+    | `Eliminar` | `[Authorize(Roles = "Admin")]` |
+  </Accordion>
+
+  <Accordion title="VentaController — Ventas">
+    La clase entera está marcada con `[Authorize]` sin especificar roles, por lo que **ambos roles** (Admin y Vendedor) pueden registrar y consultar ventas.
+
+    | Acción | Restricción |
+    |---|---|
+    | Todas las acciones | `[Authorize]` — ambos roles |
+  </Accordion>
+
+  <Accordion title="UsuarioController — Gestión de usuarios">
+    La clase entera está marcada con `[Authorize(Roles = "Admin")]`. La gestión de cuentas es exclusiva del administrador; los vendedores no tienen acceso a ninguna acción de este controlador.
+
+    | Acción | Restricción |
+    |---|---|
+    | `Index` | `[Authorize(Roles = "Admin")]` |
+    | `Crear` (GET y POST) | `[Authorize(Roles = "Admin")]` |
+    | `Editar` (GET y POST) | `[Authorize(Roles = "Admin")]` |
+    | `Eliminar` | `[Authorize(Roles = "Admin")]` |
+  </Accordion>
+
+  <Accordion title="ReporteController — Reportes">
+    La clase **no tiene** `[Authorize]` a nivel de clase. Los reportes son accesibles para cualquier usuario autenticado sin restricción de rol adicional.
+
+    | Acción | Restricción |
+    |---|---|
+    | Todas las acciones | Sin restricción de rol explícita |
+  </Accordion>
+
+  <Accordion title="HomeController — Dashboard">
+    La clase **no tiene** atributo `[Authorize]`. El dashboard y las vistas generales son accesibles sin requerir autenticación ni rol específico.
+
+    | Acción | Restricción |
+    |---|---|
+    | Todas las acciones | Sin restricción de autenticación explícita |
+  </Accordion>
+</AccordionGroup>
+
+## Cómo se aplican los roles
+
+La configuración de autenticación en `Program.cs` establece ASP.NET Core Identity con autenticación basada en **cookies**. Las rutas de redirección están definidas explícitamente:
+
+```csharp
+builder.Services.ConfigureApplicationCookie(options =>
+{
+    options.LoginPath = "/Account/Login";
+    options.AccessDeniedPath = "/Account/AccessDenied";
+});
+```
+
+El flujo de acceso funciona de la siguiente manera:
+
+<CardGroup cols={2}>
+  <Card title="Usuario no autenticado" icon="lock">
+    Al intentar acceder a cualquier ruta protegida con `[Authorize]`, el middleware redirige automáticamente a `/Account/Login`. Tras iniciar sesión correctamente, el usuario es redirigido a `/Producto/Listar`.
+  </Card>
+  <Card title="Usuario sin permisos suficientes" icon="shield-halved">
+    Si un usuario autenticado intenta acceder a una ruta que requiere un rol que no posee (por ejemplo, un Vendedor intentando acceder a `/Usuario/Index`), el middleware redirige a `/Account/AccessDenied`.
+  </Card>
+</CardGroup>
+
+El middleware de autenticación (`app.UseAuthentication()`) se registra **antes** que el de autorización (`app.UseAuthorization()`) en el pipeline de `Program.cs`, garantizando que la identidad del usuario esté disponible cuando se evalúen los permisos.
+
+## Cuentas semilla
+
+Al iniciar la aplicación por primera vez, `SeedData.Initialize` crea automáticamente las siguientes cuentas preconfiguradas:
+
+| Email | Contraseña | Rol |
+|---|---|---|
+| `admin@micholo.com` | `admin123` | Admin |
+| `vendedor@micholo.com` | `Vendedor123` | Vendedor |
+
+Estas cuentas permiten acceder al sistema de inmediato después de ejecutar la migración inicial.
+
+<Warning>
+  **Cambia las contraseñas semilla antes de desplegar en producción.** Las credenciales `admin123` y `Vendedor123` son de conocimiento público. Modifica los valores en `SeedData.cs` o elimina los usuarios semilla y crea cuentas propias antes de hacer el despliegue.
+</Warning>

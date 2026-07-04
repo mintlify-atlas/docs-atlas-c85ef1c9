@@ -1,0 +1,145 @@
+---
+title: "Gestión de inventario: productos, stock y alertas"
+sidebarTitle: "Inventario"
+description: "Administra el catálogo de productos con paginación, filtros por nombre/categoría/proveedor, alertas de stock crítico y control de estado activo/inactivo."
+---
+
+El módulo de inventario es el núcleo de Tienda MiCholo. Desde aquí se administra el catálogo completo de productos: altas, bajas, modificaciones, control de precios de compra y venta, seguimiento del stock disponible y gestión del estado activo/inactivo de cada ítem. El acceso básico (solo lectura) está disponible para el rol **Vendedor**, mientras que las operaciones de escritura están restringidas al rol **Admin**.
+
+## Listado de productos
+
+La vista principal del módulo se accede mediante:
+
+```
+GET /Producto/Listar
+```
+
+El listado devuelve los productos ordenados alfabéticamente por nombre e incluye la información del proveedor asociado mediante un `JOIN` (`.Include(p => p.Proveedor)`). La paginación está implementada con la clase genérica `PaginatedList<T>`, que calcula automáticamente el número total de páginas y expone las propiedades `HasPreviousPage` y `HasNextPage` para la navegación.
+
+**Parámetros de filtrado y paginación**
+
+| Parámetro | Tipo | Descripción |
+|---|---|---|
+| `buscarNombre` | `string` | Filtra productos cuyo nombre contenga el texto ingresado (búsqueda parcial con `.Contains`). |
+| `filtrarCategoria` | `string` | Filtra por coincidencia exacta de categoría (`p.Categoria == filtrarCategoria`). |
+| `filtrarProveedor` | `int?` | Filtra por el ID del proveedor (`p.Proveedor_ID == filtrarProveedor`). |
+| `pageNumber` | `int?` | Número de página actual. Si se omite, se usa la página `1`. |
+
+Cada página muestra **10 productos** (`pageSize = 10`). Los filtros activos se preservan en `ViewBag` (`BuscarNombre`, `FiltrarCategoria`, `FiltrarProveedor`) para mantenerlos visibles en el formulario entre navegaciones de página.
+
+<Note>
+  La lista desplegable de categorías y la de proveedores disponibles en los filtros se cargan dinámicamente desde la base de datos en cada petición, vía `ViewBag.Categorias` y `ViewBag.Proveedores`.
+</Note>
+
+## Alertas de stock crítico
+
+El sistema identifica automáticamente los productos con existencias bajas. Se considera **stock crítico** cuando `Stock <= 5`.
+
+<CardGroup cols={2}>
+  <Card title="Panel lateral en el listado" icon="bell">
+    Cada vez que se carga `GET /Producto/Listar`, el sistema consulta los productos con `Stock <= 5`, los ordena de menor a mayor stock y toma los **primeros 10** (`Take(10)`). El resultado se almacena en `ViewBag.ProductosCriticos` y se muestra en el panel de alertas lateral de la vista.
+  </Card>
+  <Card title="Página de alertas dedicada" icon="triangle-exclamation">
+    Para una vista completa de todos los productos con stock crítico, navega a `GET /Producto/DashboardAlertas`. Esta vista carga **todos** los productos con `Stock <= 5`, incluye el proveedor asociado y los ordena de menor a mayor stock, sin límite de 10 registros.
+  </Card>
+</CardGroup>
+
+## Categorías
+
+```
+GET /Producto/Categorias
+```
+
+Esta vista agrupa todos los productos por su campo `Categoria` y calcula las siguientes métricas por grupo:
+
+| Campo calculado | Descripción |
+|---|---|
+| `Nombre` | Nombre de la categoría (`g.Key`). |
+| `CantidadProductos` | Número de productos en la categoría (`g.Count()`). |
+| `ValorTotal` | Valor total del stock: `SUM(PrecioVenta * Stock)`. |
+
+Los grupos se ordenan alfabéticamente por nombre de categoría y se exponen en `ViewBag.CategoriasStats`.
+
+## Crear producto
+
+<Note>
+  Esta acción requiere el rol **Admin**. Los usuarios con rol **Vendedor** serán redirigidos al acceso denegado.
+</Note>
+
+```
+GET  /Producto/Nuevo   → Formulario de alta
+POST /Producto/Nuevo   → Guarda el nuevo producto
+```
+
+El formulario incluye todos los campos del modelo `Producto`. La validación se realiza tanto a nivel de anotaciones (`DataAnnotations`) como con lógica de negocio adicional en el controlador.
+
+**Campos del modelo `Producto`**
+
+| Campo | Tipo C# | Validaciones |
+|---|---|---|
+| `Codigo` | `string` | Requerido. Longitud máxima: **50** caracteres. |
+| `Nombre` | `string` | Requerido. Longitud máxima: **100** caracteres. Solo letras, números, espacios y tildes — regex: `^[a-zA-Z0-9\sáéíóúÁÉÍÓÚñÑ]+$`. |
+| `Categoria` | `string` | Requerida. Longitud máxima: **50** caracteres. |
+| `PrecioCompra` | `decimal(18,2)` | Requerido. Debe ser **> 0** (mínimo `0.01`). |
+| `PrecioVenta` | `decimal(18,2)` | Requerido. Debe ser **>= PrecioCompra** (validado en el controlador). |
+| `Stock` | `int` | Requerido. Debe ser **>= 0** (no puede ser negativo). |
+| `Activo` | `bool` | Opcional. Valor por defecto: `true`. |
+| `FechaVencimiento` | `DateOnly?` | Opcional. Si se proporciona, **no puede ser una fecha pasada** (validado en el controlador: `FechaVencimiento < DateOnly.FromDateTime(DateTime.Now)`). |
+| `Proveedor_ID` | `int` (FK) | Requerido. Debe corresponder a un proveedor existente. Se selecciona desde un desplegable cargado con `ViewBag.Proveedores`. |
+
+<Accordion title="Validaciones adicionales del controlador">
+  Además de las anotaciones del modelo, el controlador `POST /Producto/Nuevo` aplica estas dos reglas de negocio antes de guardar:
+
+  1. **Precio de venta vs. precio de compra:** si `PrecioVenta < PrecioCompra`, se agrega el error `"El precio de venta no puede ser menor al de compra."` al campo `PrecioVenta`.
+  2. **Fecha de vencimiento pasada:** si `FechaVencimiento` tiene valor y es anterior a la fecha actual, se agrega el error `"La fecha de vencimiento no puede ser una fecha pasada."` al campo `FechaVencimiento`.
+
+  Si el `ModelState` no es válido, se recarga el formulario con las listas de categorías y proveedores disponibles.
+</Accordion>
+
+## Editar y desactivar
+
+```
+GET  /Producto/Editar/{id}   → Carga el formulario con los datos actuales
+POST /Producto/Editar/{id}   → Guarda los cambios
+POST /Producto/ToggleActivo  → Cambia el estado Activo/Inactivo
+```
+
+El formulario de edición aplica exactamente las mismas validaciones que el de creación (incluyendo las reglas de negocio del controlador). Si el producto no se encuentra, se redirige a `Listar` con un mensaje de error en `TempData["Error"]`.
+
+**Desactivar / reactivar un producto**
+
+`POST /Producto/ToggleActivo` recibe el `id` del producto por formulario, invierte el valor de `producto.Activo` (`!producto.Activo`) y guarda el cambio. El mensaje de confirmación indica si el producto fue **activado** o **desactivado**.
+
+```csharp
+// Lógica del toggle en el controlador
+producto.Activo = !producto.Activo;
+await _context.SaveChangesAsync();
+TempData["Success"] = $"Producto '{producto.Nombre}' {(producto.Activo ? "activado" : "desactivado")} correctamente.";
+```
+
+<Note>
+  Los productos inactivos (`Activo = false`) **no aparecen** en los resultados de búsqueda AJAX de ventas (`GET /Venta/BuscarProductos`), por lo que no pueden agregarse a nuevas ventas hasta ser reactivados.
+</Note>
+
+## Eliminar producto
+
+```
+GET /Producto/Eliminar/{id}
+```
+
+Antes de eliminar físicamente el registro, el controlador verifica si existen registros de `DetalleVenta` asociados al producto:
+
+```csharp
+bool tieneVentas = await _context.DetallesVentas.AnyAsync(d => d.Producto_ID == id);
+if (tieneVentas)
+{
+    TempData["Error"] = "No se puede eliminar el producto porque esta registrado en transacciones de venta existentes.";
+    return RedirectToAction(nameof(Listar));
+}
+```
+
+Si el producto está referenciado en al menos una venta, la eliminación se **bloquea** y se muestra el mensaje de error. Esto preserva la integridad del historial de ventas. Solo los productos sin historial de ventas pueden eliminarse de forma permanente.
+
+<Note>
+  Solo los usuarios con el rol **Admin** pueden crear, editar, cambiar el estado (ToggleActivo) o eliminar productos. El rol **Vendedor** únicamente tiene acceso de lectura al listado (`GET /Producto/Listar`).
+</Note>

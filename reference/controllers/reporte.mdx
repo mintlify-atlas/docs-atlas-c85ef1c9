@@ -1,0 +1,94 @@
+---
+title: "ReporteController: reporte de productos más vendidos"
+sidebarTitle: "ReporteController"
+description: "Referencia del ReporteController: acción MasVendidos que agrupa DetallesVentas por producto, suma cantidades y montos, y devuelve el top 5 más vendido."
+---
+
+`ReporteController` proporciona analítica de ventas para Tienda MiCholo. A diferencia del resto de controllers, **no tiene ningún atributo `[Authorize]` declarado a nivel de clase**, por lo que el acceso queda gobernado únicamente por el middleware de autenticación global de la aplicación. El controller recibe `AppDbContext` vía inyección de dependencias y utiliza LINQ para agregar los datos de `DetallesVentas` directamente, sin pasar por el modelo `Venta`.
+
+---
+
+### GET /Reporte/MasVendidos
+
+Consulta la tabla `DetallesVentas`, agrupa por producto y devuelve el **top 5** de productos más vendidos según la cantidad total despachada.
+
+**Autorización:** Sin `[Authorize]` explícito en el controller ni en la acción.
+
+**Comportamiento:**
+
+La consulta parte de `_context.DetallesVentas.Include(d => d.Producto)`, agrupa por `Producto_ID` y proyecta el siguiente objeto anónimo para cada grupo:
+
+```csharp
+var topProductos = await _context.DetallesVentas
+    .Include(d => d.Producto)
+    .GroupBy(d => d.Producto_ID)
+    .Select(grupo => new {
+        ProductoId      = grupo.Key,
+        NombreProducto  = grupo.First().Producto.Nombre,
+        CantidadTotal   = grupo.Sum(d => d.Cantidad),
+        TotalRecaudado  = grupo.Sum(d => d.Cantidad * d.PrecioUnitario)
+    })
+    .OrderByDescending(x => x.CantidadTotal)
+    .Take(5)
+    .ToListAsync();
+```
+
+**Forma del resultado proyectado:**
+
+<ResponseField name="ProductoId" type="int">
+  Identificador del producto (`Producto_ID`, clave de agrupación).
+</ResponseField>
+
+<ResponseField name="NombreProducto" type="string">
+  Nombre del producto obtenido del primer elemento del grupo mediante la navegación `grupo.First().Producto.Nombre`.
+</ResponseField>
+
+<ResponseField name="CantidadTotal" type="int">
+  Suma total de unidades vendidas (`SUM(Cantidad)`) a lo largo de todos los `DetallesVentas` del grupo.
+</ResponseField>
+
+<ResponseField name="TotalRecaudado" type="decimal">
+  Monto total recaudado calculado como `SUM(Cantidad * PrecioUnitario)` para todos los `DetallesVentas` del grupo.
+</ResponseField>
+
+**Ordenamiento:** descendente por `CantidadTotal`. En caso de empate, el orden lo determina el motor de base de datos.
+
+**Límite:** `.Take(5)` — solo se devuelven los 5 primeros resultados.
+
+**Comportamiento en error:**
+- Si ocurre una excepción durante la consulta, establece `TempData["Error"]` con el mensaje de la excepción y redirige a `Home/Index`.
+
+**Retorno:** `View(List<{ProductoId, NombreProducto, CantidadTotal, TotalRecaudado}>)`.
+
+```csharp
+[HttpGet]
+public async Task<IActionResult> MasVendidos()
+```
+
+---
+
+<Note>
+  El reporte incluye **todos los `DetallesVentas` históricos**, incluyendo aquellos pertenecientes a ventas con `Estado == EstadoVenta.Anulada`. Esto se debe a que la consulta se realiza directamente sobre `DetallesVentas` sin hacer join con la tabla `Ventas` ni filtrar por estado.
+</Note>
+
+<Tip>
+  Para excluir las ventas anuladas del cómputo, agrega un filtro sobre la navegación a `Venta` antes del `GroupBy`:
+
+  ```csharp
+  _context.DetallesVentas
+      .Include(d => d.Producto)
+      .Include(d => d.Venta)                                     // incluir navegación
+      .Where(d => d.Venta.Estado == EstadoVenta.Activa)          // solo ventas activas
+      .GroupBy(d => d.Producto_ID)
+      .Select(grupo => new {
+          ProductoId     = grupo.Key,
+          NombreProducto = grupo.First().Producto.Nombre,
+          CantidadTotal  = grupo.Sum(d => d.Cantidad),
+          TotalRecaudado = grupo.Sum(d => d.Cantidad * d.PrecioUnitario)
+      })
+      .OrderByDescending(x => x.CantidadTotal)
+      .Take(5)
+  ```
+
+  Esto requiere que la entidad `DetalleVenta` tenga una propiedad de navegación `Venta` configurada en el modelo EF Core.
+</Tip>

@@ -1,0 +1,116 @@
+{
+  "projectType": "saas",
+  "projectName": "Tienda MiCholo",
+  "projectDescription": "A full-stack ASP.NET Core web application for retail store management, covering inventory, sales, suppliers, users, and reporting.",
+  "theme": "almond",
+  "primaryColor": "#2563EB",
+  "lightColor": "#DBEAFE",
+  "darkColor": "#1E3A8A",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guía de Usuario",
+        "groups": [
+          {
+            "group": "Introducción",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Módulos Principales",
+            "pages": [
+              "modules/inventario",
+              "modules/ventas",
+              "modules/proveedores",
+              "modules/reportes"
+            ]
+          },
+          {
+            "group": "Administración",
+            "pages": [
+              "admin/usuarios",
+              "admin/roles-y-permisos",
+              "admin/configuracion"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Referencia Técnica",
+        "groups": [
+          {
+            "group": "Arquitectura",
+            "pages": [
+              "reference/arquitectura",
+              "reference/base-de-datos",
+              "reference/autenticacion"
+            ]
+          },
+          {
+            "group": "Modelos de Datos",
+            "pages": [
+              "reference/modelos/producto",
+              "reference/modelos/venta",
+              "reference/modelos/proveedor"
+            ]
+          },
+          {
+            "group": "Controladores",
+            "pages": [
+              "reference/controllers/producto",
+              "reference/controllers/venta",
+              "reference/controllers/proveedor",
+              "reference/controllers/usuario",
+              "reference/controllers/reporte"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Inventory management with product catalog, stock tracking, and expiration date alerts",
+    "Point-of-sale with BOLETA and FACTURA receipt types and real-time stock deduction",
+    "Supplier (Proveedor) management with RUC validation and product association",
+    "Role-based access control with Admin and Vendedor roles via ASP.NET Identity",
+    "Dashboard with daily sales totals, active product count, and 7-day sales chart",
+    "Best-selling products report (top 5 by quantity sold)",
+    "Soft-delete for sales (Anulada state) with automatic stock restoration",
+    "Paginated and filterable product listing by name, category, and supplier",
+    "Bulk product import from JSON file on startup via SeedData",
+    "Low-stock alert dashboard for products with 5 or fewer units"
+  ],
+  "publicApiSurface": [
+    "GET /Producto/Listar — paginated, filterable product list",
+    "GET /Producto/Nuevo — create product form (Admin)",
+    "POST /Producto/Nuevo — submit new product (Admin)",
+    "GET /Producto/Editar/{id} — edit product form (Admin)",
+    "POST /Producto/Editar — update product (Admin)",
+    "POST /Producto/ToggleActivo — activate/deactivate product (Admin)",
+    "GET /Producto/Eliminar/{id} — delete product (Admin)",
+    "GET /Producto/DashboardAlertas — low-stock alert dashboard",
+    "GET /Producto/Categorias — category summary view",
+    "GET /Venta/Registrar — new sale form",
+    "POST /Venta/Registrar — submit new sale with stock deduction",
+    "GET /Venta/BuscarProductos?q= — AJAX product search endpoint",
+    "GET /Venta/Historial — sales history",
+    "GET /Venta/Editar/{id} — edit sale form",
+    "POST /Venta/Editar — update sale",
+    "GET /Venta/Eliminar/{id} — soft-delete (annul) sale and restore stock",
+    "GET /Proveedor/Listar — supplier list (Admin)",
+    "POST /Proveedor/Nuevo — create supplier (Admin)",
+    "POST /Proveedor/Editar — update supplier (Admin)",
+    "GET /Proveedor/Eliminar/{id} — delete supplier (Admin)",
+    "GET /Reporte/MasVendidos — top 5 best-selling products report",
+    "GET /Home/Index — dashboard with KPIs and 7-day chart",
+    "GET /Usuario/Index — user list (Admin)",
+    "POST /Usuario/Crear — create user (Admin)",
+    "POST /Usuario/Editar — update user role/password (Admin)",
+    "POST /Usuario/Eliminar — delete user (Admin)",
+    "GET /Account/Login — login form",
+    "POST /Account/Login — authenticate user",
+    "POST /Account/Logout — sign out"
+  ]
+}

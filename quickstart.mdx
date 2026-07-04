@@ -1,47 +1,121 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Configurar y ejecutar Tienda MiCholo desde cero"
+sidebarTitle: "Inicio Rápido"
+description: "Aprende a configurar Tienda MiCholo en tu entorno local en menos de 10 minutos: base de datos, migraciones, usuarios semilla y primer acceso."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
+Esta guía te lleva paso a paso desde cero hasta tener Tienda MiCholo funcionando en tu máquina local. Al finalizar, tendrás la base de datos `DB_TIENDA_MICHOLO` creada y migrada, los usuarios y roles de prueba listos, el catálogo de productos importado automáticamente y la aplicación accesible en el navegador. No se necesita configuración adicional: el proyecto está pensado para arrancar con un solo comando una vez clonado.
 
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+## Requisitos previos
 
-## Prerequisites
+Asegúrate de tener instaladas las siguientes herramientas antes de comenzar:
 
-Before you begin, you must have:
+- **[.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)** — necesario para compilar y ejecutar el proyecto.
+- **SQL Server o LocalDB** — la cadena de conexión por defecto apunta a la instancia `(localdb)\MSSQLLocalDB`, que se instala automáticamente con Visual Studio 2022 o posterior. Si prefieres una instancia completa de SQL Server, actualiza la cadena de conexión en `appsettings.json`.
+- **Git** — para clonar el repositorio.
 
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+## Pasos de instalación
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Clonar el repositorio">
+    Abre una terminal y ejecuta:
 
     ```bash
-    npm install your-package
+    git clone https://github.com/interezante456-pixel/proyecto-dise-o.git
+    cd proyecto-dise-o
+    ```
+
+    Esto descarga el código fuente y te posiciona en la raíz del proyecto, donde se encuentra el archivo `TiendaMiCholo.csproj`.
+  </Step>
+
+  <Step title="Configurar la cadena de conexión">
+    El archivo `appsettings.json` ya incluye una cadena de conexión lista para LocalDB. No necesitas modificarla si usas Visual Studio o tienes instalado el componente LocalDB:
+
+    ```json
+    {
+      "ConnectionStrings": {
+        "CadenaMiCholo": "Data Source=(localdb)\\MSSQLLocalDB;Initial Catalog=DB_TIENDA_MICHOLO;Trusted_Connection=True;TrustServerCertificate=True;"
+      }
+    }
+    ```
+
+    Descripción de cada parámetro:
+
+    | Parámetro | Valor | Significado |
+    |---|---|---|
+    | `Data Source` | `(localdb)\MSSQLLocalDB` | Instancia LocalDB incluida con Visual Studio |
+    | `Initial Catalog` | `DB_TIENDA_MICHOLO` | Nombre de la base de datos que se creará |
+    | `Trusted_Connection` | `True` | Usa autenticación de Windows (sin usuario/contraseña) |
+    | `TrustServerCertificate` | `True` | Permite la conexión sin validar el certificado TLS (desarrollo) |
+
+    Si usas una instancia distinta de SQL Server, reemplaza el valor de `Data Source` con el nombre de tu servidor y ajusta las credenciales según corresponda.
+  </Step>
+
+  <Step title="Aplicar las migraciones de base de datos">
+    Desde la raíz del proyecto, ejecuta:
+
+    ```bash
+    dotnet ef database update
+    ```
+
+    Este comando aplica todas las migraciones pendientes y crea la base de datos `DB_TIENDA_MICHOLO` en LocalDB si aún no existe. También crea las tablas de ASP.NET Identity (usuarios, roles, claims) y las tablas del dominio: `Productos`, `Proveedores`, `Ventas` y `DetallesVentas`.
+
+    <Info>
+      Si recibes el error `'dotnet-ef' command not found`, instala la herramienta globalmente con `dotnet tool install --global dotnet-ef`.
+    </Info>
+  </Step>
+
+  <Step title="Ejecutar la aplicación">
+    Inicia el servidor de desarrollo con:
+
+    ```bash
+    dotnet run
+    ```
+
+    Al arrancar, el método `SeedData.Initialize` crea automáticamente los roles `Admin` y `Vendedor` y los dos usuarios de prueba si todavía no existen. Acto seguido, `SeedData.SeedProductos` lee el archivo `productos.json` ubicado en la raíz del proyecto e importa el catálogo completo de productos (en lotes de 1 000 registros) vinculándolos a un proveedor por defecto llamado **Proveedor General**. Este proceso solo ocurre la primera vez; en arranques posteriores se omite si ya existen registros en la tabla.
+
+    La aplicación quedará disponible en:
+
+    ```
+    http://localhost:5276
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
 
-    ```bash
-    your-cli init
-    ```
-  </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+  <Step title="Primer acceso">
+    Abre tu navegador y navega a la pantalla de inicio de sesión:
 
-    ```bash
-    your-cli start
     ```
+    http://localhost:5276/Account/Login
+    ```
+
+    Ingresa con cualquiera de las credenciales semilla descritas en la sección siguiente. Al autenticarte, serás redirigido al listado de productos en `/Producto/Listar`.
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## Usuarios semilla
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
+Al iniciar la aplicación por primera vez, `SeedData` crea los siguientes usuarios de prueba listos para usar:
+
+| Email | Contraseña | Rol |
+|---|---|---|
+| `admin@micholo.com` | `admin123` | Admin |
+| `vendedor@micholo.com` | `Vendedor123` | Vendedor |
+
+<Warning>
+  Las contraseñas semilla son intencionalmente simples para facilitar el desarrollo local. **No uses estas credenciales en un entorno de producción.** Cambia las contraseñas o elimina los usuarios semilla antes de desplegar la aplicación públicamente.
+</Warning>
+
+## Después del primer acceso
+
+Una vez autenticado, la aplicación te llevará a `/Producto/Listar`, donde verás el catálogo completo importado desde `productos.json` con código, nombre, categoría, precio y stock de cada artículo.
+
+Si inicias sesión como **Admin**, también tienes acceso al dashboard en `/Home/Index`, que muestra:
+
+- **Total de ventas del día** — suma de todas las ventas registradas en la fecha actual.
+- **Gráfico de los últimos 7 días** — evolución diaria de ventas para identificar tendencias rápidamente.
+
+Desde la barra de navegación podrás acceder al módulo de proveedores, registrar nuevas ventas y gestionar usuarios según tu rol.
+
+<Tip>
+  La ruta por defecto de la aplicación está configurada en `Program.cs` como `{controller=Producto}/{action=Listar}/{id?}`, por lo que navegar a la raíz del sitio (`http://localhost:5276/`) te lleva directamente al listado de productos, no al dashboard de `Home`. Esto es intencional para que el flujo de trabajo principal esté un clic menos lejos.
 </Tip>
