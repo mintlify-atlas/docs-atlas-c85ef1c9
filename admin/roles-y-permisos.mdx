@@ -1,7 +1,7 @@
 ---
 title: "Roles y permisos: Admin y Vendedor en Tienda MiCholo"
 sidebarTitle: "Roles y Permisos"
-description: "Conoce los dos roles integrados del sistema: Admin con acceso total y Vendedor con permisos de venta. Aprende cómo se aplican las restricciones por controlador."
+description: "Sistema RBAC con roles Admin y Vendedor. Detalla permisos por controlador, cuentas semilla precargadas y las rutas de redirección para acceso denegado."
 ---
 
 Tienda MiCholo utiliza el sistema de control de acceso basado en roles (RBAC) de **ASP.NET Core Identity**. Cada usuario del sistema tiene asignado exactamente un rol, y ese rol determina a qué secciones de la aplicación puede acceder. Los roles se crean automáticamente al iniciar la aplicación a través de `SeedData.Initialize` y se aplican mediante atributos `[Authorize]` y `[Authorize(Roles = "...")]` en los controladores. Las rutas protegidas redirigen a los usuarios no autenticados a `/Account/Login` y a los usuarios sin permisos suficientes a `/Account/AccessDenied`.

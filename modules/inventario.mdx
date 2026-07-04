@@ -1,7 +1,7 @@
 ---
 title: "Gestión de inventario: productos, stock y alertas"
 sidebarTitle: "Inventario"
-description: "Administra el catálogo de productos con paginación, filtros por nombre/categoría/proveedor, alertas de stock crítico y control de estado activo/inactivo."
+description: "Administra el catálogo de productos con paginación, filtros por nombre, categoría y proveedor, alertas de stock crítico y control activo/inactivo."
 ---
 
 El módulo de inventario es el núcleo de Tienda MiCholo. Desde aquí se administra el catálogo completo de productos: altas, bajas, modificaciones, control de precios de compra y venta, seguimiento del stock disponible y gestión del estado activo/inactivo de cada ítem. El acceso básico (solo lectura) está disponible para el rol **Vendedor**, mientras que las operaciones de escritura están restringidas al rol **Admin**.
@@ -77,6 +77,7 @@ El formulario incluye todos los campos del modelo `Producto`. La validación se 
 
 | Campo | Tipo C# | Validaciones |
 |---|---|---|
+| `IdProducto` | `int` | Clave primaria, generada automáticamente por la base de datos (`[DatabaseGenerated(Identity)]`). |
 | `Codigo` | `string` | Requerido. Longitud máxima: **50** caracteres. |
 | `Nombre` | `string` | Requerido. Longitud máxima: **100** caracteres. Solo letras, números, espacios y tildes — regex: `^[a-zA-Z0-9\sáéíóúÁÉÍÓÚñÑ]+$`. |
 | `Categoria` | `string` | Requerida. Longitud máxima: **50** caracteres. |

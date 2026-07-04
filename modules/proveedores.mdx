@@ -1,7 +1,7 @@
 ---
 title: "Gestión de proveedores con validación de RUC peruano"
 sidebarTitle: "Proveedores"
-description: "Crea, edita y elimina proveedores. El sistema valida el formato RUC peruano (11 dígitos) y bloquea la eliminación si el proveedor tiene productos activos."
+description: "Crea, edita y elimina proveedores con validación de RUC peruano de 11 dígitos, unicidad de RUC y bloqueo de eliminación si existen productos asociados."
 ---
 
 El módulo de proveedores permite administrar el directorio de empresas o personas que abastecen el inventario de Tienda MiCholo. Cada producto del catálogo está vinculado a exactamente un proveedor mediante la clave foránea `Proveedor_ID`. El módulo completo está protegido por el atributo `[Authorize(Roles = "Admin")]` a nivel de controlador, por lo que únicamente los usuarios con rol **Admin** pueden acceder a cualquiera de sus vistas o acciones.

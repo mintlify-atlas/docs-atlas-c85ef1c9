@@ -1,7 +1,7 @@
 ---
 title: "ProductoController: rutas, parámetros y autorización"
 sidebarTitle: "ProductoController"
-description: "Referencia de todas las acciones del ProductoController: listado paginado, creación, edición, toggle de estado y eliminación de productos. Requiere rol Admin para escritura."
+description: "Referencia de las 9 acciones del ProductoController: paginación, alta, edición, cambio de estado y eliminación de productos. Escritura restringida a Admin."
 ---
 
 `ProductoController` gestiona todas las operaciones CRUD sobre el catálogo de productos de Tienda MiCholo. El controller está decorado con `[Authorize]` a nivel de clase, lo que significa que **todas las acciones exigen sesión iniciada**. Las acciones de escritura (crear, editar, cambiar estado y eliminar) añaden además `[Authorize(Roles = "Admin")]`, restringiendo esas rutas únicamente al rol Admin. El controller recibe `AppDbContext` vía inyección de dependencias y utiliza `PaginatedList<T>` del namespace `TiendaMiCholo.Helpers` para el listado paginado.
@@ -210,8 +210,8 @@ Invierte el estado `Activo` (habilitado/deshabilitado) del producto indicado.
 
 **Autorización:** `[Authorize(Roles = "Admin")]`.
 
-<ParamField body="id" type="int" required>
-  Identificador del producto (`IdProducto`).
+<ParamField query="id" type="int" required>
+  Identificador del producto (`IdProducto`). Se envía como parámetro de formulario o query string, no como cuerpo JSON.
 </ParamField>
 
 **Comportamiento:**

@@ -1,7 +1,7 @@
 ---
 title: "ProveedorController: CRUD de proveedores (solo Admin)"
 sidebarTitle: "ProveedorController"
-description: "Referencia del ProveedorController: listar, crear, editar y eliminar proveedores. Todo el controlador requiere rol Admin. Valida unicidad de RUC y protege relaciones."
+description: "Referencia del ProveedorController: listar, crear, editar y eliminar proveedores. Todo el controller requiere Admin. Valida unicidad de RUC y relaciones."
 ---
 
 `ProveedorController` gestiona el mantenimiento del catálogo de proveedores de Tienda MiCholo. El controller está decorado con `[Authorize(Roles = "Admin")]` a **nivel de clase**, lo que significa que **todas sus acciones están restringidas exclusivamente al rol Admin** — ningún usuario con rol distinto puede acceder a ninguna ruta de este controller. Recibe `AppDbContext` vía inyección de dependencias. El modelo `Proveedor` requiere `RazonSocial` (sin números), `Ruc` (11 dígitos) y `Telefono` (9 dígitos comenzando en 9, sin repeticiones).

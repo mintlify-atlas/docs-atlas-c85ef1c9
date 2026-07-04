@@ -1,7 +1,7 @@
 ---
 title: "Gestión de usuarios: crear, editar y eliminar cuentas"
 sidebarTitle: "Usuarios"
-description: "Administra las cuentas de usuario del sistema desde el panel Admin. Crea usuarios con rol, edita contraseñas y elimina cuentas con protección contra auto-eliminación."
+description: "Panel exclusivo para Admin. Crea cuentas con rol asignado, actualiza contraseñas y elimina usuarios con protección integrada contra auto-eliminación."
 ---
 
 El módulo de gestión de usuarios permite a los administradores de Tienda MiCholo crear, visualizar, editar y eliminar cuentas del sistema. Está implementado en `UsuarioController` y protegido en su totalidad con `[Authorize(Roles = "Admin")]`, lo que significa que ningún usuario con rol **Vendedor** —ni ningún visitante no autenticado— puede acceder a estas rutas. Toda la gestión de cuentas se realiza a través de ASP.NET Core Identity, usando `UserManager<IdentityUser>` y `RoleManager<IdentityRole>`.

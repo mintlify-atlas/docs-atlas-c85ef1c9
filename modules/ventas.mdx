@@ -1,7 +1,7 @@
 ---
 title: "Registro de ventas: BOLETA, FACTURA y control de stock"
 sidebarTitle: "Ventas"
-description: "Registra ventas con búsqueda AJAX de productos, elige entre BOLETA y FACTURA, valida RUC y celular para facturas, y anula ventas restaurando el stock automáticamente."
+description: "Registra ventas con búsqueda AJAX, soporte BOLETA y FACTURA, validación de RUC y celular, y anulación con restauración automática de stock."
 ---
 
 El módulo de ventas permite registrar transacciones comerciales en tiempo real, con búsqueda dinámica de productos vía AJAX, soporte para dos tipos de comprobante (BOLETA y FACTURA) y gestión de estados. Al registrar una venta, el sistema descuenta el stock de cada producto automáticamente y crea los registros de `DetalleVenta` correspondientes. Todos los usuarios autenticados (rol **Admin** y **Vendedor**) pueden registrar y consultar ventas; la anulación también es accesible para ambos roles.

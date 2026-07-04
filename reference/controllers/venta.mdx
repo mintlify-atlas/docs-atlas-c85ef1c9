@@ -1,7 +1,7 @@
 ---
-title: "VentaController: registro, búsqueda AJAX e historial de ventas"
+title: "VentaController: registro AJAX e historial de ventas"
 sidebarTitle: "VentaController"
-description: "Referencia del VentaController: registro de ventas con transacción DB, búsqueda AJAX de productos, historial, edición y anulación con restauración de stock."
+description: "Referencia del VentaController: registro con transacción DB, búsqueda AJAX, historial, edición de comprobante y anulación con restauración de stock."
 ---
 
 `VentaController` gestiona el ciclo de vida completo de las ventas en Tienda MiCholo: desde el registro de nuevas ventas hasta la consulta del historial, la edición de datos de comprobante y la anulación con restauración automática de stock. El controller está decorado con `[Authorize]` a nivel de clase, por lo que **todas las acciones requieren sesión iniciada**. Recibe `AppDbContext` vía inyección de dependencias. El enum `TipoComprobante` (valores `BOLETA` / `FACTURA`) y `EstadoVenta` (valores `Activa` / `Anulada`) provienen del namespace `TiendaMiCholo.Models.Enums`.

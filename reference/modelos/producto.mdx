@@ -1,7 +1,7 @@
 ---
 title: "Modelo Producto: campos, validaciones y relaciones"
 sidebarTitle: "Producto"
-description: "Referencia completa del modelo Producto en Tienda MiCholo: campos, tipos de datos, validaciones de Data Annotations, relaciones con Proveedor y DetalleVenta."
+description: "Referencia del modelo Producto en Tienda MiCholo: campos, tipos, validaciones de Data Annotations, relaciones con Proveedor y DetalleVenta."
 ---
 
 El modelo `Producto` forma parte del espacio de nombres `TiendaMiCholo.Models` y representa cada artículo registrado en el catálogo de la tienda. Es la entidad central del sistema de inventario: almacena información de identificación, precios, stock disponible y fecha de vencimiento, y sirve como punto de conexión entre los proveedores que suministran la mercancía y los detalles de cada venta realizada. Toda operación de compra, venta o ajuste de inventario referencia directamente a esta entidad.
@@ -19,7 +19,7 @@ El modelo `Producto` forma parte del espacio de nombres `TiendaMiCholo.Models` y
 <ParamField path="Nombre" type="string" required>
   Nombre descriptivo del producto. Longitud máxima de **100 caracteres**. Solo acepta letras (incluyendo caracteres acentuados y ñ), números y espacios, según la expresión regular:
 
-  ```
+  ```text
   ^[a-zA-Z0-9\sáéíóúÁÉÍÓÚñÑ]+$
   ```
 

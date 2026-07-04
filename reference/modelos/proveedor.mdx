@@ -15,7 +15,7 @@ El modelo `Proveedor` pertenece al espacio de nombres `TiendaMiCholo.Models` y r
 <ParamField path="RazonSocial" type="string" required>
   Nombre comercial o razón social del proveedor tal como aparece registrado en SUNAT. Longitud máxima de **100 caracteres**. No puede contener dígitos numéricos, según la expresión regular:
 
-  ```
+  ```text
   ^[^0-9]+$
   ```
 
@@ -27,7 +27,7 @@ El modelo `Proveedor` pertenece al espacio de nombres `TiendaMiCholo.Models` y r
 <ParamField path="Ruc" type="string" required>
   Registro Único de Contribuyente asignado por SUNAT. Longitud máxima de **11 caracteres**. Debe contener exactamente 11 dígitos numéricos, sin letras, espacios ni guiones:
 
-  ```
+  ```text
   ^\d{11}$
   ```
 
@@ -38,10 +38,10 @@ El modelo `Proveedor` pertenece al espacio de nombres `TiendaMiCholo.Models` y r
   </Note>
 </ParamField>
 
-<ParamField path="Telefono" type="string" default="null">
-  Número de celular de contacto del proveedor. Campo **opcional**. Cuando se proporciona, debe cumplir el formato de celular peruano según la expresión regular:
+<ParamField path="Telefono" type="string">
+  Número de celular de contacto del proveedor. Campo **opcional** — no tiene anotación `[Required]`. Longitud máxima de **50 caracteres** según `[StringLength(50)]`. Cuando se proporciona, debe cumplir el formato de celular peruano según la expresión regular:
 
-  ```
+  ```text
   ^9(?!(\d)\1{7})\d{8}$
   ```
 

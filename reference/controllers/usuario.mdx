@@ -1,7 +1,7 @@
 ---
 title: "UsuarioController: gestión de usuarios y roles (Admin)"
 sidebarTitle: "UsuarioController"
-description: "Referencia del UsuarioController: listar usuarios, crear con rol, editar email/contraseña/rol y eliminar. Restringido al rol Admin. Protege contra auto-eliminación."
+description: "Referencia del UsuarioController: listar, crear con rol, editar email/contraseña y eliminar usuarios. Restringido a Admin. Protege contra auto-eliminación."
 ---
 
 `UsuarioController` proporciona la gestión completa del ciclo de vida de usuarios del sistema utilizando la infraestructura de ASP.NET Core Identity. El controller recibe `UserManager<IdentityUser>` y `RoleManager<IdentityRole>` vía inyección de dependencias, y está decorado con `[Authorize(Roles = "Admin")]` a **nivel de clase**, por lo que **ninguna acción es accesible para usuarios sin rol Admin**. Las operaciones de contraseña se realizan a través del flujo seguro `GeneratePasswordResetTokenAsync` + `ResetPasswordAsync`, evitando manipulación directa del hash.

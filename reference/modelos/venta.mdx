@@ -1,7 +1,7 @@
 ---
 title: "Modelos Venta y DetalleVenta: campos y enumeraciones"
 sidebarTitle: "Venta"
-description: "Referencia del modelo Venta con sus campos, enumeraciones EstadoVenta y TipoComprobante, y el modelo DetalleVenta que registra los productos de cada venta."
+description: "Referencia del modelo Venta en Tienda MiCholo: campos, enumeraciones EstadoVenta y TipoComprobante, y el modelo VentaItem para el carrito temporal."
 ---
 
 El modelo `Venta` pertenece al espacio de nombres `TiendaMiCholo.Models` y representa el encabezado de un comprobante de venta generado en la tienda. Cada instancia de `Venta` agrupa la información del cliente, el tipo de comprobante emitido, el total de la transacción y el estado actual del documento. Los productos incluidos en cada venta se registran por separado en la entidad `DetalleVenta`, que actúa como línea de detalle y mantiene la relación entre el encabezado y los artículos vendidos. Juntos, `Venta` y `DetalleVenta` forman el núcleo del módulo de facturación de Tienda MiCholo.
